@@ -76,3 +76,37 @@ def crear_reserva(datos: CreacionReservaDTO):
     # 3. Si la lógica de POO arroja ReservaError, devolvemos error HTTP 400 (Bad Request)
     except ReservaError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/reservas")
+def listar_reservas():
+    resultado = []
+    for res in reservas_db:
+        resultado.append({
+            "id_reserva": res.id_reserva,
+            "usuario": res.usuario.nombre,
+            "espacio": res.espacio.nombre,
+            "horas": res.horas,
+            "total": res.calcular_total()
+        })
+    return resultado
+
+@app.delete("/reservas/{id_reserva}")
+def cancelar_reserva(id_reserva: int):
+    # 1. Buscamos si la reserva existe en nuestra lista
+    reserva_encontrada = None
+    for res in reservas_db:
+        if res.id_reserva == id_reserva:
+            reserva_encontrada = res
+            break
+
+    # 2. Si no existe, devolvemos error HTTP 404 (Not Found)
+    if not reserva_encontrada:
+        raise HTTPException(status_code=404, detail="La reserva no existe.")
+
+    # 3. Liberamos el espacio ocupado usando el método de nuestra POO
+    reserva_encontrada.espacio.liberar()
+
+    # 4. Quitamos la reserva de la lista
+    reservas_db.remove(reserva_encontrada)
+
+    return {"mensaje": f"Reserva #{id_reserva} cancelada y espacio liberado con éxito."}
