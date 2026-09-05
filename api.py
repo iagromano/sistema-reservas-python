@@ -1,112 +1,119 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from modelos import Usuario, Espacio, Reserva, ReservaError
+from fastapi import FastAPI, HTTPException, Depends
+from sqlmodel import Session, select
+from typing import List
 
-app = FastAPI(title="Sistema de Reservas API")
+# Importamos la conexión a la BD
+from database import engine, crear_db_y_tablas, obtener_sesion
 
-# Base de datos simulada en memoria
-espacios_db = {
-    1: Espacio(1, "Sala A", 4, 1000.0),
-    2: Espacio(2, "Sala B", 10, 2500.0)
-}
-usuarios_db = {
-    1: Usuario(1, "aris", "aris@gmail.com")
-}
-reservas_db = []
+# Importamos las tablas de SQLite, las clases de POO y los errores
+from modelos import (
+    EspacioDB, UsuarioDB, ReservaTabla,
+    Espacio, Usuario, Reserva, ReservaError,
+    CreacionReservaDTO
+)
 
-
-# --- ESQUEMA PYDANTIC ---
-# Define la estructura requerida del JSON que nos enviará el cliente
-class CreacionReservaDTO(BaseModel):
-    id_reserva: int
-    id_usuario: int
-    id_espacio: int
-    horas: int
+app = FastAPI(title="Sistema de Reservas con SQLite")
 
 
-# --- ENDPOINTS ---
+# Evento que se ejecuta al iniciar la API: crea la base de datos y las tablas si no existen
+@app.on_event("startup")
+def on_startup():
+    crear_db_y_tablas()
 
-@app.get("/")
-def home():
-    return {"mensaje": "API de Gestión de Reservas activa"}
 
+# ==========================================
+# ENDPOINTS DE ESPACIOS
+# ==========================================
 
 @app.get("/espacios")
-def listar_espacios():
-    return [
-        {
-            "id_espacio": esp.id_espacio,
-            "nombre": esp.nombre,
-            "capacidad": esp.capacidad,
-            "precio_por_hora": esp.precio_por_hora,
-            "esta_disponible": esp.esta_disponible
-        }
-        for esp in espacios_db.values()
-    ]
+def listar_espacios(session: Session = Depends(obtener_sesion)):
+    # Buscamos todas las filas de la tabla 'espacio' en SQLite
+    espacios = session.exec(select(EspacioDB)).all()
+    return espacios
 
+
+@app.post("/espacios")
+def crear_espacio(espacio: EspacioDB, session: Session = Depends(obtener_sesion)):
+    # Guarda un nuevo espacio directamente en la BD
+    session.add(espacio)
+    session.commit()
+    session.refresh(espacio)
+    return espacio
+
+
+# ==========================================
+# ENDPOINTS DE USUARIOS
+# ==========================================
+
+@app.post("/usuarios")
+def crear_usuario(usuario: UsuarioDB, session: Session = Depends(obtener_sesion)):
+    # Guarda un nuevo usuario en la BD
+    session.add(usuario)
+    session.commit()
+    session.refresh(usuario)
+    return usuario
+
+
+# ==========================================
+# ENDPOINT PRINCIPAL: CREAR RESERVA (POO + SQL)
+# ==========================================
 
 @app.post("/reservas")
-def crear_reserva(datos: CreacionReservaDTO):
-    # 1. Buscar si existen el usuario y el espacio solicitados
-    usuario = usuarios_db.get(datos.id_usuario)
-    espacio = espacios_db.get(datos.id_espacio)
+def crear_reserva(datos: CreacionReservaDTO, session: Session = Depends(obtener_sesion)):
+    # 1. Leemos de la BD real (SQLite)
+    usuario_db = session.get(UsuarioDB, datos.id_usuario)
+    espacio_db = session.get(EspacioDB, datos.id_espacio)
 
-    if not usuario:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    if not espacio:
-        raise HTTPException(status_code=404, detail="Espacio no encontrado")
+    if not usuario_db or not espacio_db:
+        raise HTTPException(status_code=404, detail="Usuario o Espacio no encontrado")
 
-    # 2. Intentar instanciar el modelo con sus validaciones de POO
+    # 2. Reconstruimos los objetos para la lógica POO
+    usuario_poo = Usuario(
+        id_usuario=usuario_db.id_usuario,
+        nombre=usuario_db.nombre,
+        email=usuario_db.email
+    )
+    espacio_poo = Espacio(
+        id_espacio=espacio_db.id_espacio,
+        nombre=espacio_db.nombre,
+        capacidad=espacio_db.capacidad,
+        precio_por_hora=espacio_db.precio_por_hora,
+        esta_disponible=espacio_db.esta_disponible
+    )
+
+    # 3. Validaciones y Lógica de Negocio (POO)
     try:
-        nueva_reserva = Reserva(
+        reserva_poo = Reserva(
             id_reserva=datos.id_reserva,
-            usuario=usuario,
-            espacio=espacio,
+            usuario=usuario_poo,
+            espacio=espacio_poo,
             horas=datos.horas
         )
-        
-        reservas_db.append(nueva_reserva)
-        
-        return {
-            "mensaje": "Reserva creada con éxito",
-            "resumen": nueva_reserva.obtener_resumen(),
-            "total": nueva_reserva.calcular_total()
-        }
-
-    # 3. Si la lógica de POO arroja ReservaError, devolvemos error HTTP 400 (Bad Request)
-    except ReservaError as e:
+    except Exception as e:
+        # Atrapa ReservaError o cualquier otro fallo y devuelve un 400 limpio
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.get("/reservas")
-def listar_reservas():
-    resultado = []
-    for res in reservas_db:
-        resultado.append({
-            "id_reserva": res.id_reserva,
-            "usuario": res.usuario.nombre,
-            "espacio": res.espacio.nombre,
-            "horas": res.horas,
-            "total": res.calcular_total()
-        })
-    return resultado
+    # 4. Sincronizamos el nuevo estado del Espacio con la Base de Datos
+    espacio_db.esta_disponible = espacio_poo.esta_disponible
+    session.add(espacio_db)
 
-@app.delete("/reservas/{id_reserva}")
-def cancelar_reserva(id_reserva: int):
-    # 1. Buscamos si la reserva existe en nuestra lista
-    reserva_encontrada = None
-    for res in reservas_db:
-        if res.id_reserva == id_reserva:
-            reserva_encontrada = res
-            break
+    # 5. Preparamos el registro de la Reserva para SQLite
+    nueva_reserva_db = ReservaTabla(
+        id_reserva=datos.id_reserva,
+        id_usuario=datos.id_usuario,
+        id_espacio=datos.id_espacio,
+        horas=datos.horas,
+        total=reserva_poo.calcular_total()
+    )
+    session.add(nueva_reserva_db)
 
-    # 2. Si no existe, devolvemos error HTTP 404 (Not Found)
-    if not reserva_encontrada:
-        raise HTTPException(status_code=404, detail="La reserva no existe.")
+    # 6. Escribimos físicamente en el archivo database.db
+    session.commit()
+    session.refresh(espacio_db)
 
-    # 3. Liberamos el espacio ocupado usando el método de nuestra POO
-    reserva_encontrada.espacio.liberar()
-
-    # 4. Quitamos la reserva de la lista
-    reservas_db.remove(reserva_encontrada)
-
-    return {"mensaje": f"Reserva #{id_reserva} cancelada y espacio liberado con éxito."}
+    # 7. Retornamos la respuesta de éxito
+    return {
+        "mensaje": "Reserva guardada con éxito en SQLite",
+        "id_reserva": nueva_reserva_db.id_reserva,
+        "total": nueva_reserva_db.total
+    }

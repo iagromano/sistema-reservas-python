@@ -1,4 +1,38 @@
-# Heredamos de Exception para crear nuestro propio tipo de error
+from typing import Optional
+from sqlmodel import SQLModel, Field
+
+# ==========================================
+# 1. TABLAS PARA LA BASE DE DATOS (SQLModel)
+# ==========================================
+
+class EspacioDB(SQLModel, table=True):
+    __tablename__ = "espacio"
+    id_espacio: Optional[int] = Field(default=None, primary_key=True)
+    nombre: str
+    capacidad: int
+    precio_por_hora: float
+    esta_disponible: bool = True
+
+
+class UsuarioDB(SQLModel, table=True):
+    __tablename__ = "usuario"
+    id_usuario: Optional[int] = Field(default=None, primary_key=True)
+    nombre: str
+    email: str
+
+
+class ReservaTabla(SQLModel, table=True):
+    __tablename__ = "reserva"
+    id_reserva: Optional[int] = Field(default=None, primary_key=True)
+    id_usuario: int = Field(foreign_key="usuario.id_usuario")
+    id_espacio: int = Field(foreign_key="espacio.id_espacio")
+    horas: int
+    total: float# Heredamos de Exception para crear nuestro propio tipo de error
+
+# ==========================================
+# 2. LÓGICA DE NEGOCIO POO (Tus clases intactas)
+# ==========================================
+
 class ReservaError(Exception):
     """Excepción personalizada para errores del sistema de reservas."""
     pass
@@ -20,12 +54,12 @@ class Usuario:
 
 
 class Espacio:
-    def __init__(self, id_espacio: int, nombre: str, capacidad: int, precio_por_hora: float):
+    def __init__(self, id_espacio: int, nombre: str, capacidad: int, precio_por_hora: float, esta_disponible: bool = True):
         self.id_espacio = id_espacio
         self.nombre = nombre
         self.capacidad = capacidad
         self.precio_por_hora = precio_por_hora
-        self.esta_disponible = True
+        self.esta_disponible = esta_disponible  # Toma el valor de la BD (o True por defecto)
 
     def reservar(self):
         if self.esta_disponible:
@@ -65,3 +99,11 @@ class Reserva:
         total = self.calcular_total()
         return f"Reserva #{self.id_reserva} | Usuario: {self.usuario.nombre} | Espacio: {self.espacio.nombre} | Total: ${total}"
 
+from pydantic import BaseModel
+
+# DTO para recibir los datos desde el cliente en la API
+class CreacionReservaDTO(BaseModel):
+    id_reserva: int
+    id_usuario: int
+    id_espacio: int
+    horas: int
