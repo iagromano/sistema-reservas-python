@@ -107,3 +107,4 @@ class CreacionReservaDTO(BaseModel):
     id_usuario: int
     id_espacio: int
     horas: int
+

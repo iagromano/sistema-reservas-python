@@ -117,3 +117,35 @@ def crear_reserva(datos: CreacionReservaDTO, session: Session = Depends(obtener_
         "id_reserva": nueva_reserva_db.id_reserva,
         "total": nueva_reserva_db.total
     }
+
+@app.get("/reservas")
+def listar_reservas(session: Session = Depends(obtener_sesion)):
+    # Buscamos todos los registros en la tabla ReservaTabla
+    reservas = session.exec(select(ReservaTabla)).all()
+    return reservas
+
+from typing import Optional
+
+# Buscador dinámico: permite combinar filtros opcionales (precio, capacidad) 
+# usando Optional para no exigir parámetros y acumulando .where() según lo enviado.
+@app.get("/espacios/buscar")
+def buscar_espacios(
+    precio_maximo: Optional[float] = None,
+    minima_capacidad: Optional[int] = None,
+    session: Session = Depends(obtener_sesion)
+):
+    # Paso A: Arrancamos con la consulta base (sin filtros todavía)
+    consulta = select(EspacioDB)
+
+    # Paso B: Evaluamos si el usuario mandó el precio
+    if precio_maximo is not None:
+        consulta = consulta.where(EspacioDB.precio_por_hora <= precio_maximo)
+
+    # Paso C: Evaluamos si el usuario mandó la capacidad
+    if minima_capacidad is not None:
+        consulta = consulta.where(EspacioDB.capacidad >= minima_capacidad)
+
+    # Paso D: Recién acá enviamos la consulta final acumulada a la BD
+    resultados = session.exec(consulta).all()
+    
+    return resultados
