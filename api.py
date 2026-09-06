@@ -126,7 +126,7 @@ def listar_reservas(session: Session = Depends(obtener_sesion)):
 
 from typing import Optional
 
-# Buscador dinámico: permite combinar filtros opcionales (precio, capacidad) 
+# Buscador dinámico: permite combinar filtros opcionales (precio, capacidad y disponibilidad) 
 # usando Optional para no exigir parámetros y acumulando .where() según lo enviado.
 @app.get("/espacios/buscar")
 def buscar_espacios(
@@ -149,3 +149,26 @@ def buscar_espacios(
     resultados = session.exec(consulta).all()
     
     return resultados
+
+
+@app.delete("/reservas/{id_reserva}")
+def cancelar_reserva(id_reserva: int, session: Session = Depends(obtener_sesion)):
+    # 1. Buscar la reserva en la BD
+    reserva = session.get(ReservaTabla, id_reserva)
+    if not reserva:
+        raise HTTPException(status_code=404, detail="la reserva no existe")
+
+    # 2. buscar el espacio asociado a esa reserva
+    espacio = session.get(EspacioDB, reserva.id_espacio)
+    if espacio:
+        #3. volver a pner el espacio disponible
+        espacio.esta_disponible = True
+        session.add(espacio)
+
+    #4. eliminar la reserva de la BD
+    session.delete(reserva)
+
+    #5. confirmar los cambios en el disco
+    session.commit()
+
+    return{"mensaje": f"Reserva {id_reserva} cancelada exitosamente y espacio liberado"}
