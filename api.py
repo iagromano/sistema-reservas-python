@@ -172,3 +172,11 @@ def cancelar_reserva(id_reserva: int, session: Session = Depends(obtener_sesion)
     session.commit()
 
     return{"mensaje": f"Reserva {id_reserva} cancelada exitosamente y espacio liberado"}
+
+@app.get("/reservas/{id}")
+def obtener_reserva_por_id(id_reserva: int, session: Sesssion = Depends(obtener_sesion)):
+    reserva = session.get(ReservaTabla, id_reserva)
+    if not reserva:
+        raise HTTPException(status_code=404, detail= "la reserva no existe")
+
+    return reserva
