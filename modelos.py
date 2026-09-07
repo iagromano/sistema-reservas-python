@@ -1,34 +1,52 @@
-from typing import Optional
-from sqlmodel import SQLModel, Field
+from typing import Optional, List
+from sqlmodel import SQLModel, Field, Relationship
 
 # ==========================================
 # 1. TABLAS PARA LA BASE DE DATOS (SQLModel)
 # ==========================================
 
+
+# --- TABLA USUARIO ---
+class UsuarioDB(SQLModel, table=True):
+    __tablename__ = "usuario"
+
+    id_usuario: Optional[int] = Field(default=None, primary_key=True)
+    nombre: str
+    email: str
+
+    # Relación inversa: Un usuario puede tener muchas reservas
+    reservas: List["ReservaTabla"] = Relationship(back_populates="usuario")
+
+
+# --- TABLA ESPACIO ---
 class EspacioDB(SQLModel, table=True):
     __tablename__ = "espacio"
+
     id_espacio: Optional[int] = Field(default=None, primary_key=True)
     nombre: str
     capacidad: int
     precio_por_hora: float
     esta_disponible: bool = True
 
-
-class UsuarioDB(SQLModel, table=True):
-    __tablename__ = "usuario"
-    id_usuario: Optional[int] = Field(default=None, primary_key=True)
-    nombre: str
-    email: str
+    # Relación inversa: Un espacio puede tener muchas reservas
+    reservas: List["ReservaTabla"] = Relationship(back_populates="espacio")
 
 
+# --- TABLA RESERVA (Conecta ambas tablas) ---
 class ReservaTabla(SQLModel, table=True):
     __tablename__ = "reserva"
+
     id_reserva: Optional[int] = Field(default=None, primary_key=True)
+    horas: int
+    total: float
+
+    # 1. Claves Foráneas (Restricción física en SQLite)
     id_usuario: int = Field(foreign_key="usuario.id_usuario")
     id_espacio: int = Field(foreign_key="espacio.id_espacio")
-    horas: int
-    total: float# Heredamos de Exception para crear nuestro propio tipo de error
 
+    # 2. Propiedades de Relación (Magia de Python para navegar entre objetos)
+    usuario: Optional[UsuarioDB] = Relationship(back_populates="reservas")
+    espacio: Optional[EspacioDB] = Relationship(back_populates="reservas")
 # ==========================================
 # 2. LÓGICA DE NEGOCIO POO (Tus clases intactas)
 # ==========================================

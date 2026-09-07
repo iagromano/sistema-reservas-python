@@ -280,10 +280,27 @@ def cancelar_reserva(id_reserva: int, session: Session = Depends(obtener_sesion)
 
     return{"mensaje": f"Reserva {id_reserva} cancelada exitosamente y espacio liberado"}
 
-@app.get("/reservas/{id}")
-def obtener_reserva_por_id(id_reserva: int, session: Session = Depends(obtener_sesion)):
+
+@app.get("/reservas/{id_reserva}")
+def obtener_reserva_detallada(
+    id_reserva: int, 
+    session: Session = Depends(obtener_sesion)
+):
     reserva = session.get(ReservaTabla, id_reserva)
     if not reserva:
-        raise HTTPException(status_code=404, detail= "la reserva no existe")
+        raise HTTPException(status_code=404, detail="Reserva no encontrada")
 
-    return reserva
+    # Accedemos directamente a los objetos relacionados sin hacer session.get manual
+    return {
+        "id_reserva": reserva.id_reserva,
+        "horas": reserva.horas,
+        "total": reserva.total,
+        "cliente": {
+            "nombre": reserva.usuario.nombre,
+            "email": reserva.usuario.email
+        },
+        "espacio_reservado": {
+            "nombre": reserva.espacio.nombre,
+            "precio_por_hora": reserva.espacio.precio_por_hora
+        }
+    }
