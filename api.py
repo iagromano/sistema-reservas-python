@@ -182,6 +182,17 @@ def eliminar_usuario(id_usuario: int, session: Session = Depends(obtener_sesion)
 
     return {"mensaje": f"Usuario {id_usuario} eliminado con éxito"}
 
+@app.get("/usuarios/{id_usuario}/reservas")
+def obtener_reservas_de_usuarios(
+    id_usuario: int,
+    session: Session = Depends(obtener_sesion)
+):
+    usuario = session.get(UsuarioDB,id_usuario)
+
+    if not usuario:
+        raise HTTPException(status_code=404, detail= f"usuario con id: {id_usuario} no existe")
+
+    return usuario.reservas
 
 # ==========================================
 # ENDPOINT PRINCIPAL: CREAR RESERVA (POO + SQL)
