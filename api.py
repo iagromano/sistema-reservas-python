@@ -180,3 +180,29 @@ def obtener_reserva_por_id(id_reserva: int, session: Sesssion = Depends(obtener_
         raise HTTPException(status_code=404, detail= "la reserva no existe")
 
     return reserva
+
+@app.patch("/espacios/{id_espacio}")
+def actualizar_espacio(
+    id_espacio: int,
+    precio_por_hora: Optional[float] = None,
+    capacidad: Optional[int] = None,
+    session: Session = Depends(obtener_sesion)
+):
+    #1. Buscar espacio
+    espacio = session.get(EspacioDB, id_espacio)
+    if not espacio:
+        raise HTTPException(status_code= 404, detail="el espacio no existe")
+
+    #2. Modificar solo los datos que me dieron
+    if precio_por_hora is not None:
+        espacio.precio_por_hora = precio_por_hora
+
+    if capacidad is not None:
+        espacio.capacidad = capacidad
+
+    #3. Guardar los cambios es SQLite
+    session.add(espacio)
+    session.commit()
+    session.refresh(espacio)
+
+    return espacio
