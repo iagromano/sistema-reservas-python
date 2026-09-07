@@ -158,6 +158,30 @@ def actualizar_usuario(
 
     return usuario
 
+@app.delete("/usuarios/{id_usuario}")
+def eliminar_usuario(id_usuario: int, session: Session = Depends(obtener_sesion)):
+    # 1. Buscar si el usuario existe
+    usuario = session.get(UsuarioDB, id_usuario)
+    if not usuario:
+        raise HTTPException(status_code=404, detail="El usuario no existe")
+
+    # 2. Validar si tiene reservas asociadas
+    reserva_existente = session.exec(
+        select(ReservaTabla).where(ReservaTabla.id_usuario == id_usuario)
+    ).first()
+
+    if reserva_existente:
+        raise HTTPException(
+            status_code=400, 
+            detail="No se puede eliminar el usuario porque tiene reservas activas. Cancelá o borrá sus reservas primero."
+        )
+
+    # 3. Borrar el usuario
+    session.delete(usuario)
+    session.commit()
+
+    return {"mensaje": f"Usuario {id_usuario} eliminado con éxito"}
+
 
 # ==========================================
 # ENDPOINT PRINCIPAL: CREAR RESERVA (POO + SQL)
