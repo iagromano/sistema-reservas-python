@@ -66,6 +66,35 @@ def buscar_espacios(
     
     return resultados
 
+@app.patch("/espacios/{id_espacio}")
+def actualizar_espacio(
+    id_espacio: int,
+    precio_por_hora: Optional[float] = None,
+    capacidad: Optional[int] = None,
+    session: Session = Depends(obtener_sesion)
+):
+    #1. Buscar espacio
+    espacio = session.get(EspacioDB, id_espacio)
+    if not espacio:
+        raise HTTPException(status_code= 404, detail="el espacio no existe")
+
+    #2. Modificar solo los datos que me dieron
+    if precio_por_hora is not None:
+        espacio.precio_por_hora = precio_por_hora
+
+    if capacidad is not None:
+        espacio.capacidad = capacidad
+
+    #3. Guardar los cambios es SQLite
+    session.add(espacio)
+    session.commit()
+    session.refresh(espacio)
+
+    return espacio
+
+
+
+
 # ==========================================
 # ENDPOINTS DE USUARIOS
 # ==========================================
@@ -100,6 +129,32 @@ def obtener_usuario(id_usuario: int, session: Session = Depends(obtener_sesion))
 
     if not usuario:
         raise HTTPException(status_code=404, detail=f"usuario con ID: {id_usuario} no existe")
+
+    return usuario
+
+@app.patch("/usuarios/{id_usuario}")
+def actualizar_usuario(
+    id_usuario: int,
+    nombre: Optional[str] = None,
+    email: Optional[str] = None,
+    session: Session = Depends(obtener_sesion)
+):
+    #1. Buscar usuario
+    usuario = session.get(UsuarioDB, id_usuario)
+    if not usuario:
+        raise HTTPException(status_code= 404, detail="el usuario no existe")
+
+    #2. Modificar solo los datos que me dieron
+    if nombre is not None:
+        usuario.nombre = nombre
+
+    if email is not None:
+        usuario.email = email
+
+    #3. Guardar los cambios es SQLite
+    session.add(usuario)
+    session.commit()
+    session.refresh(usuario)
 
     return usuario
 
@@ -208,30 +263,3 @@ def obtener_reserva_por_id(id_reserva: int, session: Session = Depends(obtener_s
         raise HTTPException(status_code=404, detail= "la reserva no existe")
 
     return reserva
-
-@app.patch("/espacios/{id_espacio}")
-def actualizar_espacio(
-    id_espacio: int,
-    precio_por_hora: Optional[float] = None,
-    capacidad: Optional[int] = None,
-    session: Session = Depends(obtener_sesion)
-):
-    #1. Buscar espacio
-    espacio = session.get(EspacioDB, id_espacio)
-    if not espacio:
-        raise HTTPException(status_code= 404, detail="el espacio no existe")
-
-    #2. Modificar solo los datos que me dieron
-    if precio_por_hora is not None:
-        espacio.precio_por_hora = precio_por_hora
-
-    if capacidad is not None:
-        espacio.capacidad = capacidad
-
-    #3. Guardar los cambios es SQLite
-    session.add(espacio)
-    session.commit()
-    session.refresh(espacio)
-
-    return espacio
-
