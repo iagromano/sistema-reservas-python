@@ -9,7 +9,7 @@ from database import engine, crear_db_y_tablas, obtener_sesion
 from modelos import (
     EspacioDB, UsuarioDB, ReservaTabla,
     Espacio, Usuario, Reserva, ReservaError,
-    CreacionReservaDTO
+    CreacionReservaDTO, CrearUsuarioDTO
 )
 
 app = FastAPI(title="Sistema de Reservas con SQLite")
@@ -40,17 +40,67 @@ def crear_espacio(espacio: EspacioDB, session: Session = Depends(obtener_sesion)
     session.refresh(espacio)
     return espacio
 
+from typing import Optional
+
+# Buscador dinámico: permite combinar filtros opcionales (precio, capacidad y disponibilidad) 
+# usando Optional para no exigir parámetros y acumulando .where() según lo enviado.
+@app.get("/espacios/buscar")
+def buscar_espacios(
+    precio_maximo: Optional[float] = None,
+    minima_capacidad: Optional[int] = None,
+    session: Session = Depends(obtener_sesion)
+):
+    # Paso A: Arrancamos con la consulta base (sin filtros todavía)
+    consulta = select(EspacioDB)
+
+    # Paso B: Evaluamos si el usuario mandó el precio
+    if precio_maximo is not None:
+        consulta = consulta.where(EspacioDB.precio_por_hora <= precio_maximo)
+
+    # Paso C: Evaluamos si el usuario mandó la capacidad
+    if minima_capacidad is not None:
+        consulta = consulta.where(EspacioDB.capacidad >= minima_capacidad)
+
+    # Paso D: Recién acá enviamos la consulta final acumulada a la BD
+    resultados = session.exec(consulta).all()
+    
+    return resultados
 
 # ==========================================
 # ENDPOINTS DE USUARIOS
 # ==========================================
 
-@app.post("/usuarios")
-def crear_usuario(usuario: UsuarioDB, session: Session = Depends(obtener_sesion)):
+@app.post("/usuarios", status_code=201)
+def crear_usuario(
+    datos: CrearUsuarioDTO,
+    session: Session = Depends(obtener_sesion)
+    ):
+
+    #1. crear el objero para la BD a partir del DTO
+    usuario_nuevo = UsuarioDB(
+        nombre = datos.nombre,
+        email= datos.email
+    )
+
     # Guarda un nuevo usuario en la BD
-    session.add(usuario)
+    session.add(usuario_nuevo)
     session.commit()
-    session.refresh(usuario)
+    session.refresh(usuario_nuevo)
+    return usuario_nuevo
+
+@app.get("/usuarios")
+def listar_usuarios(session: Session = Depends(obtener_sesion)):
+    usuarios = session.exec(select(UsuarioDB)).all()
+    return usuarios
+
+
+@app.get("/usuarios/{id_usuario}")
+def obtener_usuario(id_usuario: int, session: Session = Depends(obtener_sesion)):
+    usuario = session.get(UsuarioDB, id_usuario)
+
+    if not usuario:
+        raise HTTPException(status_code=404, detail=f"usuario con ID: {id_usuario} no existe")
+
     return usuario
 
 
@@ -64,8 +114,11 @@ def crear_reserva(datos: CreacionReservaDTO, session: Session = Depends(obtener_
     usuario_db = session.get(UsuarioDB, datos.id_usuario)
     espacio_db = session.get(EspacioDB, datos.id_espacio)
 
-    if not usuario_db or not espacio_db:
-        raise HTTPException(status_code=404, detail="Usuario o Espacio no encontrado")
+    if not usuario_db:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    if not espacio_db:
+        raise HTTPException(status_code=404, detail="UEspacio no encontrado")
 
     # 2. Reconstruimos los objetos para la lógica POO
     usuario_poo = Usuario(
@@ -124,31 +177,6 @@ def listar_reservas(session: Session = Depends(obtener_sesion)):
     reservas = session.exec(select(ReservaTabla)).all()
     return reservas
 
-from typing import Optional
-
-# Buscador dinámico: permite combinar filtros opcionales (precio, capacidad y disponibilidad) 
-# usando Optional para no exigir parámetros y acumulando .where() según lo enviado.
-@app.get("/espacios/buscar")
-def buscar_espacios(
-    precio_maximo: Optional[float] = None,
-    minima_capacidad: Optional[int] = None,
-    session: Session = Depends(obtener_sesion)
-):
-    # Paso A: Arrancamos con la consulta base (sin filtros todavía)
-    consulta = select(EspacioDB)
-
-    # Paso B: Evaluamos si el usuario mandó el precio
-    if precio_maximo is not None:
-        consulta = consulta.where(EspacioDB.precio_por_hora <= precio_maximo)
-
-    # Paso C: Evaluamos si el usuario mandó la capacidad
-    if minima_capacidad is not None:
-        consulta = consulta.where(EspacioDB.capacidad >= minima_capacidad)
-
-    # Paso D: Recién acá enviamos la consulta final acumulada a la BD
-    resultados = session.exec(consulta).all()
-    
-    return resultados
 
 
 @app.delete("/reservas/{id_reserva}")
@@ -174,7 +202,7 @@ def cancelar_reserva(id_reserva: int, session: Session = Depends(obtener_sesion)
     return{"mensaje": f"Reserva {id_reserva} cancelada exitosamente y espacio liberado"}
 
 @app.get("/reservas/{id}")
-def obtener_reserva_por_id(id_reserva: int, session: Sesssion = Depends(obtener_sesion)):
+def obtener_reserva_por_id(id_reserva: int, session: Session = Depends(obtener_sesion)):
     reserva = session.get(ReservaTabla, id_reserva)
     if not reserva:
         raise HTTPException(status_code=404, detail= "la reserva no existe")
@@ -206,3 +234,4 @@ def actualizar_espacio(
     session.refresh(espacio)
 
     return espacio
+

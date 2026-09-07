@@ -108,3 +108,10 @@ class CreacionReservaDTO(BaseModel):
     id_espacio: int
     horas: int
 
+
+from pydantic import EmailStr
+
+# --- DTO (Esquema de entrada para la API) ---
+class CrearUsuarioDTO(BaseModel):
+    nombre: str
+    email: str
