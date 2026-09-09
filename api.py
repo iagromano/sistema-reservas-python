@@ -9,7 +9,7 @@ from database import engine, crear_db_y_tablas, obtener_sesion
 from modelos import (
     EspacioDB, UsuarioDB, ReservaTabla,
     Espacio, Usuario, Reserva, ReservaError,
-    CreacionReservaDTO, CrearUsuarioDTO
+    CreacionReservaDTO, UsuarioCreate, UsuarioResponse
 )
 
 app = FastAPI(title="Sistema de Reservas con SQLite")
@@ -99,23 +99,28 @@ def actualizar_espacio(
 # ENDPOINTS DE USUARIOS
 # ==========================================
 
-@app.post("/usuarios", status_code=201)
+@app.post("/usuarios", response_model=UsuarioResponse, status_code=201)
 def crear_usuario(
-    datos: CrearUsuarioDTO,
+    usuario_input: UsuarioCreate, 
     session: Session = Depends(obtener_sesion)
-    ):
+):
+    # 1. Convertimos la contraseña plana en un hash seguro
+    password_encriptada = obtener_hash_password(usuario_input.password)
 
-    #1. crear el objero para la BD a partir del DTO
-    usuario_nuevo = UsuarioDB(
-        nombre = datos.nombre,
-        email= datos.email
+    # 2. Creamos la entidad para SQLite con el hash (NUNCA la clave plana)
+    nuevo_usuario_db = UsuarioDB(
+        nombre=usuario_input.nombre,
+        email=usuario_input.email,
+        hashed_password=password_encriptada
     )
 
-    # Guarda un nuevo usuario en la BD
-    session.add(usuario_nuevo)
+    # 3. Guardamos en la base de datos
+    session.add(nuevo_usuario_db)
     session.commit()
-    session.refresh(usuario_nuevo)
-    return usuario_nuevo
+    session.refresh(nuevo_usuario_db)
+
+    # 4. FastAPI automáticamente lo filtra usando UsuarioResponse (gracias a response_model)
+    return nuevo_usuario_db
 
 @app.get("/usuarios")
 def listar_usuarios(session: Session = Depends(obtener_sesion)):

@@ -1,4 +1,5 @@
 from typing import Optional, List
+from pydantic import BaseModel, EmailStr
 from sqlmodel import SQLModel, Field, Relationship
 
 # ==========================================
@@ -12,9 +13,10 @@ class UsuarioDB(SQLModel, table=True):
 
     id_usuario: Optional[int] = Field(default=None, primary_key=True)
     nombre: str
-    email: str
+    email: str = Field(unique=True, index=True)
+    hashed_password: str  # <--- Nuevo campo para almacenar el hash de passlib
 
-    # Relación inversa: Un usuario puede tener muchas reservas
+    # Relación inversa con ReservaTabla
     reservas: List["ReservaTabla"] = Relationship(back_populates="usuario")
 
 
@@ -117,7 +119,26 @@ class Reserva:
         total = self.calcular_total()
         return f"Reserva #{self.id_reserva} | Usuario: {self.usuario.nombre} | Espacio: {self.espacio.nombre} | Total: ${total}"
 
-from pydantic import BaseModel
+
+# ==========================================
+# 3. DTOs (Data Transfer Objects / Schemas)
+# ==========================================
+
+class UsuarioCreate(BaseModel):
+    """DTO para el registro de usuario (recibe la contraseña plana)."""
+    nombre: str
+    email: EmailStr
+    password: str  # Se recibe en texto plano desde el cliente
+
+
+class UsuarioResponse(BaseModel):
+    """DTO para la respuesta pública (Oculta la contraseña y el hash)."""
+    id_usuario: int
+    nombre: str
+    email: EmailStr
+
+    class Config:
+        from_attributes = True
 
 # DTO para recibir los datos desde el cliente en la API
 class CreacionReservaDTO(BaseModel):
@@ -125,11 +146,3 @@ class CreacionReservaDTO(BaseModel):
     id_usuario: int
     id_espacio: int
     horas: int
-
-
-from pydantic import EmailStr
-
-# --- DTO (Esquema de entrada para la API) ---
-class CrearUsuarioDTO(BaseModel):
-    nombre: str
-    email: str
