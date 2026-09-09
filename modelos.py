@@ -140,9 +140,15 @@ class UsuarioResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
 # DTO para recibir los datos desde el cliente en la API
 class CreacionReservaDTO(BaseModel):
     id_reserva: int
     id_usuario: int
     id_espacio: int
     horas: int
+

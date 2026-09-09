@@ -1,5 +1,6 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends
-from sqlmodel import Session, select
+from sqlmodel import Session, select, SQLModel
 from typing import List
 
 # Importamos la conexión a la BD
@@ -9,16 +10,23 @@ from database import engine, crear_db_y_tablas, obtener_sesion
 from modelos import (
     EspacioDB, UsuarioDB, ReservaTabla,
     Espacio, Usuario, Reserva, ReservaError,
-    CreacionReservaDTO, UsuarioCreate, UsuarioResponse
+    CreacionReservaDTO, UsuarioCreate, UsuarioResponse, TokenResponse
 )
+from seguridad import crear_token_acceso, verificar_password, obtener_hash_password
 
-app = FastAPI(title="Sistema de Reservas con SQLite")
 
 
 # Evento que se ejecuta al iniciar la API: crea la base de datos y las tablas si no existen
-@app.on_event("startup")
-def on_startup():
-    crear_db_y_tablas()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Código que se ejecuta al arrancar la aplicación
+    SQLModel.metadata.create_all(engine)
+    yield
+    # Código que se ejecuta al apagar la aplicación (si hiciera falta)
+
+# Le pasás el lifespan al instanciar FastAPI
+app = FastAPI(lifespan=lifespan)
 
 
 # ==========================================
@@ -320,3 +328,37 @@ def obtener_reserva_detallada(
             "precio_por_hora": reserva.espacio.precio_por_hora
         }
     }
+
+
+# ==========================================
+# ENDPOINTS DE Login
+# ==========================================
+
+@app.post("/login", response_model=TokenResponse)
+def login(
+    credenciales: UsuarioCreate,  # Reutilizamos el DTO que recibe email y password
+    session: Session = Depends(obtener_sesion)
+):
+    # 1. Buscar al usuario por su email
+    query = select(UsuarioDB).where(UsuarioDB.email == credenciales.email)
+    usuario = session.exec(query).first()
+
+    # 2. Validar existencia de usuario y contraseña correcta
+    # IMPORTANTE: Usamos un mensaje genérico por seguridad (evita listar emails válidos)
+    if not usuario or not verificar_password(credenciales.password, usuario.hashed_password):
+        raise HTTPException(
+            status_code=401,
+            detail="Email o contraseña incorrectos",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # 3. Crear el token con los datos que nos interesan (payload)
+    datos_token = {
+        "sub": str(usuario.id_usuario),
+        "email": usuario.email
+    }
+    access_token = crear_token_acceso(datos_token)
+
+    # 4. Devolver el token generado
+    return TokenResponse(access_token=access_token)
+
