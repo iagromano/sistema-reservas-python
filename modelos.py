@@ -145,10 +145,18 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
-# DTO para recibir los datos desde el cliente en la API
-class CreacionReservaDTO(BaseModel):
+# Lo que el cliente ENVIARÁ en el cuerpo JSON al hacer la reserva
+class ReservaCreate(BaseModel):
+    id_espacio: int
+    horas: int
+
+# Lo que la API DEVOLVERÁ al cliente tras crear la reserva
+class ReservaResponse(BaseModel):
     id_reserva: int
     id_usuario: int
     id_espacio: int
     horas: int
+    total: float
 
+    class Config:
+        from_attributes = True
