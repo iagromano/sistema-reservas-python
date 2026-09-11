@@ -281,36 +281,74 @@ def listar_reservas(session: Session = Depends(obtener_sesion)):
 
 
 @app.delete("/reservas/{id_reserva}")
-def cancelar_reserva(id_reserva: int, session: Session = Depends(obtener_sesion)):
+def cancelar_reserva(id_reserva: int, 
+                     session: Session = Depends(obtener_sesion),
+                     usuario_token: dict = Depends(obtener_usuario_actual)
+):
+    id_usuario_logueado = int(usuario_token["sub"])
+
     # 1. Buscar la reserva en la BD
     reserva = session.get(ReservaTabla, id_reserva)
     if not reserva:
         raise HTTPException(status_code=404, detail="la reserva no existe")
 
-    # 2. buscar el espacio asociado a esa reserva
+    #2. Verificar Permisos
+    es_admin = usuario_token.get("es_admin", False)
+    es_dueno = reserva.id_usuario == id_usuario_logueado
+
+    if not es_dueno and not es_admin :
+        raise HTTPException(status_code=400, detail="no tienes permisos para cancelar esta reserva")
+
+    # 3. buscar el espacio asociado a esa reserva
     espacio = session.get(EspacioDB, reserva.id_espacio)
     if espacio:
-        #3. volver a pner el espacio disponible
+        #4. volver a pner el espacio disponible
         espacio.esta_disponible = True
         session.add(espacio)
 
-    #4. eliminar la reserva de la BD
+    #5. eliminar la reserva de la BD
     session.delete(reserva)
 
-    #5. confirmar los cambios en el disco
+    #6. confirmar los cambios en el disco
     session.commit()
 
     return{"mensaje": f"Reserva {id_reserva} cancelada exitosamente y espacio liberado"}
 
+@app.get("/reservas/propias", response_model=list[ReservaResponse])
+def listar_mis_reservas(
+    session: Session = Depends(obtener_sesion),
+    usuario_token: dict = Depends(obtener_usuario_actual),
+):
+    # 1. Extraemos el ID del usuario del JWT
+    id_usuario_logueado = int(usuario_token["sub"])
+
+    # 2. Consultamos solo las reservas asociadas a este usuario
+    statement = select(ReservaTabla).where(
+        ReservaTabla.id_usuario == id_usuario_logueado
+    )
+    reservas = session.exec(statement).all()
+
+    # 3. Retornamos la lista (FastAPI las convierte a ReservaResponse)
+    return reservas
 
 @app.get("/reservas/{id_reserva}")
 def obtener_reserva_detallada(
     id_reserva: int, 
-    session: Session = Depends(obtener_sesion)
+    session: Session = Depends(obtener_sesion),
+    usuario_token: dict = Depends(obtener_usuario_actual)
 ):
+    id_usuario_logueado = int(usuario_token["sub"])
+    
     reserva = session.get(ReservaTabla, id_reserva)
     if not reserva:
         raise HTTPException(status_code=404, detail="Reserva no encontrada")
+
+    es_admin = usuario_token.get("es_admin", False)
+    es_dueno = reserva.id_usuario == id_usuario_logueado
+    
+    if not es_dueno and not es_admin :
+        raise HTTPException(status_code=400, detail="no tienes permisos para ver esta reserva")
+    
 
     # Accedemos directamente a los objetos relacionados sin hacer session.get manual
     return {
@@ -353,7 +391,8 @@ def login(
     # 3. Crear el token con los datos que nos interesan (payload)
     datos_token = {
         "sub": str(usuario.id_usuario),
-        "email": usuario.email
+        "email": usuario.email,
+        "es_admin": getattr(UsuarioDB, "es_admin", False)
     }
     access_token = crear_token_acceso(datos_token)
 
