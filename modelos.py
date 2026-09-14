@@ -14,7 +14,8 @@ class UsuarioDB(SQLModel, table=True):
     id_usuario: Optional[int] = Field(default=None, primary_key=True)
     nombre: str
     email: str = Field(unique=True, index=True)
-    hashed_password: str  # <--- Nuevo campo para almacenar el hash de passlib
+    hashed_password: str  
+    es_admin: bool = False
 
     # Relación inversa con ReservaTabla
     reservas: List["ReservaTabla"] = Relationship(back_populates="usuario")
@@ -124,29 +125,34 @@ class Reserva:
 # 3. DTOs (Data Transfer Objects / Schemas)
 # ==========================================
 
+# --- ESPACIOS ---
 class EspacioCreateDTO(BaseModel):
-    """DTO para el registro de epacios"""
+    """DTO para la creación de un nuevo espacio."""
     nombre: str
     capacidad: int
     precio_por_hora: float
     esta_disponible: bool = True
 
+
 class EspacioUpdateDTO(BaseModel):
-    """DTO para actualizar epacios"""
+    """DTO para la actualización parcial de un espacio."""
     nombre: Optional[str] = None
     capacidad: Optional[int] = None
     precio_por_hora: Optional[float] = None
     esta_disponible: Optional[bool] = None
 
+
+# --- USUARIOS ---
 class UsuarioCreate(BaseModel):
-    """DTO para el registro de usuario (recibe la contraseña plana)."""
+    """DTO para el registro de un nuevo usuario."""
     nombre: str
     email: EmailStr
-    password: str  # Se recibe en texto plano desde el cliente
+    password: str 
+    es_admin: bool = False
 
 
 class UsuarioResponse(BaseModel):
-    """DTO para la respuesta pública (Oculta la contraseña y el hash)."""
+    """DTO para la respuesta de datos públicos de usuario."""
     id_usuario: int
     nombre: str
     email: EmailStr
@@ -154,18 +160,29 @@ class UsuarioResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
+# --- AUTENTICACIÓN ---
+class UsuarioLoginDTO(BaseModel):
+    """DTO para la autenticación de usuario (credenciales)."""
+    email: str
+    password: str
+
+
 class TokenResponse(BaseModel):
+    """DTO para la respuesta con el token JWT de acceso."""
     access_token: str
     token_type: str = "bearer"
 
 
-# Lo que el cliente ENVIARÁ en el cuerpo JSON al hacer la reserva
+# --- RESERVAS ---
 class ReservaCreate(BaseModel):
+    """DTO para la solicitud de creación de una reserva."""
     id_espacio: int
     horas: int
 
-# Lo que la API DEVOLVERÁ al cliente tras crear la reserva
+
 class ReservaResponse(BaseModel):
+    """DTO para la respuesta detallada de una reserva creada."""
     id_reserva: int
     id_usuario: int
     id_espacio: int

@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import Depends, FastAPI, HTTPException, status
 from sqlmodel import Session, select, SQLModel
 from typing import List
 from typing import Optional
@@ -13,7 +13,7 @@ from modelos import (
     Espacio, Usuario, Reserva, ReservaError,
     UsuarioCreate, UsuarioResponse,
     TokenResponse, ReservaCreate, ReservaResponse,
-    EspacioCreateDTO, EspacioUpdateDTO
+    EspacioCreateDTO, EspacioUpdateDTO, UsuarioLoginDTO
 )
 
 from seguridad import crear_token_acceso, verificar_password, obtener_hash_password, obtener_usuario_actual
@@ -38,7 +38,7 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/espacios")
 def listar_espacios(
-    esta_disponible: Optional[Bool] = None,
+    esta_disponible: Optional[bool] = None,
     session: Session = Depends(obtener_sesion)
 ):
 
@@ -151,7 +151,7 @@ def eliminar_espacio(
     usuario_token: dict = Depends(obtener_usuario_actual),
 ):
     #1. Buscar si el usuario es Administrador
-    es_admin = usuario_token.get("es_admin, False")
+    es_admin = usuario_token.get("es_admin", False)
 
     if not es_admin:
         raise HTTPException(
@@ -199,7 +199,8 @@ def crear_usuario(
     nuevo_usuario_db = UsuarioDB(
         nombre=usuario_input.nombre,
         email=usuario_input.email,
-        hashed_password=password_encriptada
+        hashed_password=password_encriptada,
+        es_admin=usuario_input.es_admin
     )
 
     # 3. Guardamos en la base de datos
@@ -451,7 +452,7 @@ def obtener_reserva_detallada(
 
 @app.post("/login", response_model=TokenResponse)
 def login(
-    credenciales: UsuarioCreate,  # Reutilizamos el DTO que recibe email y password
+    credenciales: UsuarioLoginDTO,
     session: Session = Depends(obtener_sesion)
 ):
     # 1. Buscar al usuario por su email
@@ -471,7 +472,7 @@ def login(
     datos_token = {
         "sub": str(usuario.id_usuario),
         "email": usuario.email,
-        "es_admin": getattr(UsuarioDB, "es_admin", False)
+        "es_admin": usuario.es_admin
     }
     access_token = crear_token_acceso(datos_token)
 
