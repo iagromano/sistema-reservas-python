@@ -124,6 +124,20 @@ class Reserva:
 # 3. DTOs (Data Transfer Objects / Schemas)
 # ==========================================
 
+class EspacioCreateDTO(BaseModel):
+    """DTO para el registro de epacios"""
+    nombre: str
+    capacidad: int
+    precio_por_hora: float
+    esta_disponible: bool = True
+
+class EspacioUpdateDTO(BaseModel):
+    """DTO para actualizar epacios"""
+    nombre: Optional[str] = None
+    capacidad: Optional[int] = None
+    precio_por_hora: Optional[float] = None
+    esta_disponible: Optional[bool] = None
+
 class UsuarioCreate(BaseModel):
     """DTO para el registro de usuario (recibe la contraseña plana)."""
     nombre: str

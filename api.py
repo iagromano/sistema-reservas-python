@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends
 from sqlmodel import Session, select, SQLModel
 from typing import List
+from typing import Optional
 
 # Importamos la conexión a la BD
 from database import engine, crear_db_y_tablas, obtener_sesion
@@ -11,7 +12,8 @@ from modelos import (
     EspacioDB, UsuarioDB, ReservaTabla,
     Espacio, Usuario, Reserva, ReservaError,
     UsuarioCreate, UsuarioResponse,
-    TokenResponse, ReservaCreate, ReservaResponse
+    TokenResponse, ReservaCreate, ReservaResponse,
+    EspacioCreateDTO, EspacioUpdateDTO
 )
 
 from seguridad import crear_token_acceso, verificar_password, obtener_hash_password, obtener_usuario_actual
@@ -35,21 +37,54 @@ app = FastAPI(lifespan=lifespan)
 # ==========================================
 
 @app.get("/espacios")
-def listar_espacios(session: Session = Depends(obtener_sesion)):
-    # Buscamos todas las filas de la tabla 'espacio' en SQLite
-    espacios = session.exec(select(EspacioDB)).all()
+def listar_espacios(
+    esta_disponible: Optional[Bool] = None,
+    session: Session = Depends(obtener_sesion)
+):
+
+    statement = select(EspacioDB)
+
+    # Si el cliente mandó esta_disponible=true o false, aplicamos el filtro
+    if esta_disponible is not None:
+        statement = statement.where(
+            EspacioDB.esta_disponible == esta_disponible
+        )
+
+    espacios = session.exec(statement).all()
     return espacios
 
+@app.post(
+    "/espacios",
+    response_model=EspacioDB,
+    status_code=status.HTTP_201_CREATED,
+)
+def crear_espacio(
+    nuevo_espacio: EspacioCreateDTO,
+    session: Session = Depends(obtener_sesion),
+    usuario_token: dict = Depends(obtener_usuario_actual),
+):
+    es_admin = usuario_token.get("es_admin", False)
+    if not es_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para crear espacios",
+        )
 
-@app.post("/espacios")
-def crear_espacio(espacio: EspacioDB, session: Session = Depends(obtener_sesion)):
-    # Guarda un nuevo espacio directamente en la BD
-    session.add(espacio)
+    # Mapeamos los campos
+    espacio_db = EspacioDB(
+        nombre=nuevo_espacio.nombre,
+        capacidad=nuevo_espacio.capacidad,
+        precio_por_hora=nuevo_espacio.precio_por_hora,
+        esta_disponible=nuevo_espacio.esta_disponible,
+    )
+
+    session.add(espacio_db)
     session.commit()
-    session.refresh(espacio)
-    return espacio
+    session.refresh(espacio_db)
 
-from typing import Optional
+    return espacio_db
+
+
 
 # Buscador dinámico: permite combinar filtros opcionales (precio, capacidad y disponibilidad) 
 # usando Optional para no exigir parámetros y acumulando .where() según lo enviado.
@@ -78,29 +113,73 @@ def buscar_espacios(
 @app.patch("/espacios/{id_espacio}")
 def actualizar_espacio(
     id_espacio: int,
-    precio_por_hora: Optional[float] = None,
-    capacidad: Optional[int] = None,
-    session: Session = Depends(obtener_sesion)
+    datos: EspacioUpdateDTO,
+    session: Session = Depends(obtener_sesion),
+    usuario_token: dict = Depends(obtener_usuario_actual)
 ):
-    #1. Buscar espacio
+
+    #1. Buscar si el usuario es administrador
+    es_admin = usuario_token.get("es_admin", False)
+
+    if not es_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para eliminar espacios",
+        )
+
+    #2. Buscar espacio
     espacio = session.get(EspacioDB, id_espacio)
     if not espacio:
         raise HTTPException(status_code= 404, detail="el espacio no existe")
 
-    #2. Modificar solo los datos que me dieron
-    if precio_por_hora is not None:
-        espacio.precio_por_hora = precio_por_hora
+    #3. Modificar solo los datos que me dieron
+    datos_dict = datos.model_dump(exclude_unset=True)
+    for clave, valor in datos_dict.items():
+        setattr(espacio, clave, valor)
 
-    if capacidad is not None:
-        espacio.capacidad = capacidad
-
-    #3. Guardar los cambios es SQLite
+    #4. Guardar los cambios es SQLite
     session.add(espacio)
     session.commit()
     session.refresh(espacio)
 
     return espacio
 
+@app.delete("/espacios/{id_espacio}")
+def eliminar_espacio(
+    id_espacio: int,
+    session: Session = Depends(obtener_sesion),
+    usuario_token: dict = Depends(obtener_usuario_actual),
+):
+    #1. Buscar si el usuario es Administrador
+    es_admin = usuario_token.get("es_admin, False")
+
+    if not es_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para eliminar espacios",
+        )
+
+    # 2. Buscar si el espacio existe
+    espacio = session.get(EspacioDB, id_espacio)
+    if not espacio:
+        raise HTTPException(status_code=404, detail="El espacio no existe")
+
+    # 3. Validar si tiene reservas asociadas
+    reserva_existente = session.exec(
+        select(ReservaTabla).where(ReservaTabla.id_espacio == id_espacio)
+    ).first()
+
+    if reserva_existente:
+        raise HTTPException(
+            status_code=400, 
+            detail="No se puede eliminar el espacio porque tiene reservas activas. Cancelá o borrá sus reservas primero."
+        )
+
+    # 3. Borrar el usuario
+    session.delete(espacio)
+    session.commit()
+
+    return {"mensaje": f"espacio {id_espacio} eliminado con éxito"}
 
 
 
