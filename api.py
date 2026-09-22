@@ -13,7 +13,8 @@ from modelos import (
     Espacio, Usuario, Reserva, ReservaError,
     UsuarioCreate, UsuarioResponse,
     TokenResponse, ReservaCreate, ReservaResponse,
-    EspacioCreateDTO, EspacioUpdateDTO, UsuarioLoginDTO
+    EspacioCreateDTO, EspacioUpdateDTO, UsuarioLoginDTO,
+    ReservaUpdateDTO 
 )
 
 from seguridad import crear_token_acceso, verificar_password, obtener_hash_password, obtener_usuario_actual
@@ -189,104 +190,196 @@ def eliminar_espacio(
 # ENDPOINTS DE USUARIOS
 # ==========================================
 
-@app.post("/usuarios", response_model=UsuarioResponse, status_code=201)
+@app.post(
+    "/usuarios",
+    response_model=UsuarioResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 def crear_usuario(
-    usuario_input: UsuarioCreate, 
-    session: Session = Depends(obtener_sesion)
+    usuario_input: UsuarioCreate,
+    session: Session = Depends(obtener_sesion),
 ):
-    # 1. Convertimos la contraseña plana en un hash seguro
+    """Registra un nuevo usuario en la plataforma."""
+    # 1. Validar que el email no esté registrado previamente
+    usuario_existente = session.exec(
+        select(UsuarioDB).where(UsuarioDB.email == usuario_input.email)
+    ).first()
+    if usuario_existente:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El email ya se encuentra registrado",
+        )
+
+    # 2. Generar el hash de la contraseña
     password_encriptada = obtener_hash_password(usuario_input.password)
 
-    # 2. Creamos la entidad para SQLite con el hash (NUNCA la clave plana)
+    # 3. Instanciar y guardar la entidad en SQLite
     nuevo_usuario_db = UsuarioDB(
         nombre=usuario_input.nombre,
         email=usuario_input.email,
         hashed_password=password_encriptada,
-        es_admin=usuario_input.es_admin
+        es_admin=usuario_input.es_admin,
     )
 
-    # 3. Guardamos en la base de datos
     session.add(nuevo_usuario_db)
     session.commit()
     session.refresh(nuevo_usuario_db)
 
-    # 4. FastAPI automáticamente lo filtra usando UsuarioResponse (gracias a response_model)
     return nuevo_usuario_db
 
-@app.get("/usuarios")
-def listar_usuarios(session: Session = Depends(obtener_sesion)):
+
+@app.get(
+    "/usuarios",
+    response_model=List[UsuarioResponse],
+    status_code=status.HTTP_200_OK,
+)
+def listar_usuarios(
+    session: Session = Depends(obtener_sesion),
+    usuario_token: dict = Depends(obtener_usuario_actual),
+):
+    """Obtiene la lista completa de usuarios (exclusivo para administradores)."""
+    # 1. Validar permisos de administrador
+    es_admin = usuario_token.get("es_admin", False)
+    if not es_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para ver el listado de usuarios",
+        )
+
+    # 2. Consultar todos los usuarios
     usuarios = session.exec(select(UsuarioDB)).all()
     return usuarios
 
 
-@app.get("/usuarios/{id_usuario}")
-def obtener_usuario(id_usuario: int, session: Session = Depends(obtener_sesion)):
+@app.get(
+    "/usuarios/{id_usuario}",
+    response_model=UsuarioResponse,
+    status_code=status.HTTP_200_OK,
+)
+def obtener_usuario(
+    id_usuario: int,
+    session: Session = Depends(obtener_sesion),
+    usuario_token: dict = Depends(obtener_usuario_actual),
+):
+    """Obtiene la información pública de un usuario específico."""
+    # 1. Buscar usuario por ID
     usuario = session.get(UsuarioDB, id_usuario)
-
     if not usuario:
-        raise HTTPException(status_code=404, detail=f"usuario con ID: {id_usuario} no existe")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"El usuario con ID {id_usuario} no existe",
+        )
 
     return usuario
 
-@app.patch("/usuarios/{id_usuario}")
+
+@app.patch(
+    "/usuarios/{id_usuario}",
+    response_model=UsuarioResponse,
+    status_code=status.HTTP_200_OK,
+)
 def actualizar_usuario(
     id_usuario: int,
     nombre: Optional[str] = None,
     email: Optional[str] = None,
-    session: Session = Depends(obtener_sesion)
+    session: Session = Depends(obtener_sesion),
+    usuario_token: dict = Depends(obtener_usuario_actual),
 ):
-    #1. Buscar usuario
+    """Actualiza la información de un usuario registrado."""
+    # 1. Validar si el usuario existe
     usuario = session.get(UsuarioDB, id_usuario)
     if not usuario:
-        raise HTTPException(status_code= 404, detail="el usuario no existe")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El usuario no existe",
+        )
 
-    #2. Modificar solo los datos que me dieron
+    # 2. Validar que el usuario que intenta editar sea el mismo o un admin
+    id_usuario_actual = int(usuario_token.get("sub", 0))
+    es_admin = usuario_token.get("es_admin", False)
+
+    if id_usuario_actual != id_usuario and not es_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para modificar este perfil",
+        )
+
+    # 3. Modificar campos enviados
     if nombre is not None:
         usuario.nombre = nombre
 
     if email is not None:
         usuario.email = email
 
-    #3. Guardar los cambios es SQLite
+    # 4. Guardar cambios en SQLite
     session.add(usuario)
     session.commit()
     session.refresh(usuario)
 
     return usuario
 
-@app.delete("/usuarios/{id_usuario}")
-def eliminar_usuario(id_usuario: int, session: Session = Depends(obtener_sesion)):
-    # 1. Buscar si el usuario existe
+
+@app.delete(
+    "/usuarios/{id_usuario}",
+    status_code=status.HTTP_200_OK,
+)
+def eliminar_usuario(
+    id_usuario: int,
+    session: Session = Depends(obtener_sesion),
+    usuario_token: dict = Depends(obtener_usuario_actual),
+):
+    """Elimina un usuario de la plataforma si no posee reservas activas (exclusivo para administradores)."""
+    # 1. Validar permisos de administrador
+    es_admin = usuario_token.get("es_admin", False)
+    if not es_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para eliminar usuarios",
+        )
+
+    # 2. Buscar si el usuario existe
     usuario = session.get(UsuarioDB, id_usuario)
     if not usuario:
-        raise HTTPException(status_code=404, detail="El usuario no existe")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El usuario no existe",
+        )
 
-    # 2. Validar si tiene reservas asociadas
+    # 3. Validar si tiene reservas asociadas
     reserva_existente = session.exec(
         select(ReservaTabla).where(ReservaTabla.id_usuario == id_usuario)
     ).first()
 
     if reserva_existente:
         raise HTTPException(
-            status_code=400, 
-            detail="No se puede eliminar el usuario porque tiene reservas activas. Cancelá o borrá sus reservas primero."
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se puede eliminar el usuario porque tiene reservas activas. Cancelá o borrá sus reservas primero.",
         )
 
-    # 3. Borrar el usuario
+    # 4. Eliminar el usuario
     session.delete(usuario)
     session.commit()
 
     return {"mensaje": f"Usuario {id_usuario} eliminado con éxito"}
 
-@app.get("/usuarios/{id_usuario}/reservas")
+
+@app.get(
+    "/usuarios/{id_usuario}/reservas",
+    status_code=status.HTTP_200_OK,
+)
 def obtener_reservas_de_usuarios(
     id_usuario: int,
-    session: Session = Depends(obtener_sesion)
+    session: Session = Depends(obtener_sesion),
+    usuario_token: dict = Depends(obtener_usuario_actual),
 ):
-    usuario = session.get(UsuarioDB,id_usuario)
-
+    """Obtiene el listado de reservas asociadas a un usuario específico."""
+    # 1. Validar existencia del usuario
+    usuario = session.get(UsuarioDB, id_usuario)
     if not usuario:
-        raise HTTPException(status_code=404, detail= f"usuario con id: {id_usuario} no existe")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"El usuario con ID {id_usuario} no existe",
+        )
 
     return usuario.reservas
 
@@ -294,19 +387,27 @@ def obtener_reservas_de_usuarios(
 # ENDPOINT PRINCIPAL: CREAR RESERVA (POO + SQL)
 # ==========================================
 
-@app.post("/reservas", status_code=201)
+@app.post(
+    "/reservas",
+    response_model=ReservaResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 def crear_reserva(
     datos: ReservaCreate,
     session: Session = Depends(obtener_sesion),
-    usuario_token: dict = Depends(obtener_usuario_actual)
+    usuario_token: dict = Depends(obtener_usuario_actual),
 ):
-    # 1. Obtenemos el ID del usuario autenticado desde el JWT (ya validado por el token)
+    """Crea una nueva reserva validando disponibilidad y calculando el total."""
+    # 1. Obtener ID del usuario autenticado desde el JWT
     id_usuario_logueado = int(usuario_token["sub"])
 
-    # 2. Leemos el espacio de SQLite
+    # 2. Consultar entidades de la base de datos
     espacio_db = session.get(EspacioDB, datos.id_espacio)
     if not espacio_db:
-        raise HTTPException(status_code=404, detail="Espacio no encontrado")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El espacio no existe",
+        )
 
     usuario_db = session.get(UsuarioDB, id_usuario_logueado)
 
@@ -314,170 +415,268 @@ def crear_reserva(
     usuario_poo = Usuario(
         id_usuario=usuario_db.id_usuario,
         nombre=usuario_db.nombre,
-        email=usuario_db.email
+        email=usuario_db.email,
     )
     espacio_poo = Espacio(
         id_espacio=espacio_db.id_espacio,
         nombre=espacio_db.nombre,
         capacidad=espacio_db.capacidad,
         precio_por_hora=espacio_db.precio_por_hora,
-        esta_disponible=espacio_db.esta_disponible
+        esta_disponible=espacio_db.esta_disponible,
     )
 
     try:
         reserva_poo = Reserva(
-            id_reserva= None,
+            id_reserva=None,
             usuario=usuario_poo,
             espacio=espacio_poo,
-            horas=datos.horas
+            horas=datos.horas,
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        )
 
-    # 4. Actualización del espacio y creación del registro
+    # 4. Actualizar disponibilidad del espacio y guardar la reserva
     espacio_db.esta_disponible = espacio_poo.esta_disponible
     session.add(espacio_db)
 
     nueva_reserva_db = ReservaTabla(
-        id_usuario=id_usuario_logueado,  # <--- Asignado automáticamente desde la sesión
+        id_usuario=id_usuario_logueado,
         id_espacio=datos.id_espacio,
         horas=datos.horas,
-        total=reserva_poo.calcular_total()
+        total=reserva_poo.calcular_total(),
     )
     session.add(nueva_reserva_db)
     session.commit()
-    session.refresh(espacio_db)
+    session.refresh(nueva_reserva_db)
 
-    return {
-        "mensaje": "Reserva guardada con éxito en SQLite",
-        "id_reserva": nueva_reserva_db.id_reserva,
-        "total": nueva_reserva_db.total
-    }
+    return nueva_reserva_db
 
-@app.get("/reservas")
-def listar_reservas(session: Session = Depends(obtener_sesion)):
-    # Buscamos todos los registros en la tabla ReservaTabla
-    reservas = session.exec(select(ReservaTabla)).all()
-    return reservas
-
-
-
-@app.delete("/reservas/{id_reserva}")
-def cancelar_reserva(id_reserva: int, 
-                     session: Session = Depends(obtener_sesion),
-                     usuario_token: dict = Depends(obtener_usuario_actual)
+@app.patch(
+    "/reservas/{id_reserva}",
+    response_model=ReservaResponse,
+    status_code=status.HTTP_200_OK,
+)
+def actualizar_reserva(
+    id_reserva: int,
+    reserva_update: ReservaUpdateDTO,
+    session: Session = Depends(obtener_sesion),
+    usuario_actual: dict = Depends(
+        obtener_usuario_actual
+    ),  # Especificamos dict
 ):
-    id_usuario_logueado = int(usuario_token["sub"])
+    """Actualiza parcialmente una reserva (p. ej. las horas) y recalcula el total."""
+    # 1. Buscar la reserva en BD
+    reserva_db = session.get(ReservaTabla, id_reserva)
+    if not reserva_db:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="La reserva no existe",
+        )
 
-    # 1. Buscar la reserva en la BD
-    reserva = session.get(ReservaTabla, id_reserva)
-    if not reserva:
-        raise HTTPException(status_code=404, detail="la reserva no existe")
+    # 2. Verificar permisos extrayendo del diccionario JWT
+    id_usuario_actual = int(usuario_actual.get("sub"))
+    es_admin_actual = usuario_actual.get("es_admin", False)
 
-    #2. Verificar Permisos
-    es_admin = usuario_token.get("es_admin", False)
-    es_dueno = reserva.id_usuario == id_usuario_logueado
+    if reserva_db.id_usuario != id_usuario_actual and not es_admin_actual:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para modificar esta reserva",
+        )
 
-    if not es_dueno and not es_admin :
-        raise HTTPException(status_code=400, detail="no tienes permisos para cancelar esta reserva")
+    # 3. Aplicar los cambios enviados
+    datos_actualizar = reserva_update.model_dump(exclude_unset=True)
 
-    # 3. buscar el espacio asociado a esa reserva
-    espacio = session.get(EspacioDB, reserva.id_espacio)
-    if espacio:
-        #4. volver a pner el espacio disponible
-        espacio.esta_disponible = True
-        session.add(espacio)
+    if "horas" in datos_actualizar and datos_actualizar["horas"] is not None:
+        nuevas_horas = datos_actualizar["horas"]
 
-    #5. eliminar la reserva de la BD
-    session.delete(reserva)
+        if nuevas_horas <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Las horas deben ser mayores a cero",
+            )
 
-    #6. confirmar los cambios en el disco
+        # Traemos el espacio para recalcular el precio total dinámicamente
+        espacio = session.get(EspacioDB, reserva_db.id_espacio)
+        if espacio:
+            reserva_db.total = nuevas_horas * espacio.precio_por_hora
+
+        reserva_db.horas = nuevas_horas
+
+    # 4. Guardar cambios en la BD
+    session.add(reserva_db)
     session.commit()
+    session.refresh(reserva_db)
 
-    return{"mensaje": f"Reserva {id_reserva} cancelada exitosamente y espacio liberado"}
+    return reserva_db
 
-@app.get("/reservas/propias", response_model=list[ReservaResponse])
+@app.get(
+    "/reservas/propias",
+    response_model=List[ReservaResponse],
+    status_code=status.HTTP_200_OK,
+)
 def listar_mis_reservas(
     session: Session = Depends(obtener_sesion),
     usuario_token: dict = Depends(obtener_usuario_actual),
 ):
-    # 1. Extraemos el ID del usuario del JWT
+    """Obtiene el listado de reservas del usuario autenticado."""
     id_usuario_logueado = int(usuario_token["sub"])
 
-    # 2. Consultamos solo las reservas asociadas a este usuario
     statement = select(ReservaTabla).where(
         ReservaTabla.id_usuario == id_usuario_logueado
     )
     reservas = session.exec(statement).all()
 
-    # 3. Retornamos la lista (FastAPI las convierte a ReservaResponse)
     return reservas
 
-@app.get("/reservas/{id_reserva}")
-def obtener_reserva_detallada(
-    id_reserva: int, 
+
+@app.get(
+    "/reservas",
+    response_model=List[ReservaResponse],
+    status_code=status.HTTP_200_OK,
+)
+def listar_reservas(
     session: Session = Depends(obtener_sesion),
-    usuario_token: dict = Depends(obtener_usuario_actual)
+    usuario_token: dict = Depends(obtener_usuario_actual),
 ):
+    """Obtiene la lista completa de reservas registradas (exclusivo para administradores)."""
+    # Validar permisos de administrador
+    es_admin = usuario_token.get("es_admin", False)
+    if not es_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para ver todas las reservas",
+        )
+
+    reservas = session.exec(select(ReservaTabla)).all()
+    return reservas
+
+
+@app.get(
+    "/reservas/{id_reserva}",
+    status_code=status.HTTP_200_OK,
+)
+def obtener_reserva_detallada(
+    id_reserva: int,
+    session: Session = Depends(obtener_sesion),
+    usuario_token: dict = Depends(obtener_usuario_actual),
+):
+    """Obtiene el detalle completo de una reserva (cliente y espacio asociados)."""
     id_usuario_logueado = int(usuario_token["sub"])
-    
+
     reserva = session.get(ReservaTabla, id_reserva)
     if not reserva:
-        raise HTTPException(status_code=404, detail="Reserva no encontrada")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Reserva no encontrada",
+        )
 
     es_admin = usuario_token.get("es_admin", False)
     es_dueno = reserva.id_usuario == id_usuario_logueado
-    
-    if not es_dueno and not es_admin :
-        raise HTTPException(status_code=400, detail="no tienes permisos para ver esta reserva")
-    
 
-    # Accedemos directamente a los objetos relacionados sin hacer session.get manual
+    if not es_dueno and not es_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para ver esta reserva",
+        )
+
     return {
         "id_reserva": reserva.id_reserva,
         "horas": reserva.horas,
         "total": reserva.total,
         "cliente": {
             "nombre": reserva.usuario.nombre,
-            "email": reserva.usuario.email
+            "email": reserva.usuario.email,
         },
         "espacio_reservado": {
             "nombre": reserva.espacio.nombre,
-            "precio_por_hora": reserva.espacio.precio_por_hora
-        }
+            "precio_por_hora": reserva.espacio.precio_por_hora,
+        },
     }
 
+
+@app.delete(
+    "/reservas/{id_reserva}",
+    status_code=status.HTTP_200_OK,
+)
+def cancelar_reserva(
+    id_reserva: int,
+    session: Session = Depends(obtener_sesion),
+    usuario_token: dict = Depends(obtener_usuario_actual),
+):
+    """Cancela una reserva activa y libera automáticamente la disponibilidad del espacio."""
+    id_usuario_logueado = int(usuario_token["sub"])
+
+    # 1. Buscar la reserva
+    reserva = session.get(ReservaTabla, id_reserva)
+    if not reserva:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="La reserva no existe",
+        )
+
+    # 2. Verificar Permisos (dueño o admin)
+    es_admin = usuario_token.get("es_admin", False)
+    es_dueno = reserva.id_usuario == id_usuario_logueado
+
+    if not es_dueno and not es_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para cancelar esta reserva",
+        )
+
+    # 3. Liberar el espacio asociado
+    espacio = session.get(EspacioDB, reserva.id_espacio)
+    if espacio:
+        espacio.esta_disponible = True
+        session.add(espacio)
+
+    # 4. Eliminar el registro de la reserva
+    session.delete(reserva)
+    session.commit()
+
+    return {
+        "mensaje": f"Reserva {id_reserva} cancelada exitosamente y espacio liberado"
+    }
 
 # ==========================================
 # ENDPOINTS DE Login
 # ==========================================
 
-@app.post("/login", response_model=TokenResponse)
+@app.post(
+    "/login",
+    response_model=TokenResponse,
+    status_code=status.HTTP_200_OK,
+)
 def login(
     credenciales: UsuarioLoginDTO,
-    session: Session = Depends(obtener_sesion)
+    session: Session = Depends(obtener_sesion),
 ):
+    """Autentica a un usuario registrado y genera un token de acceso JWT."""
     # 1. Buscar al usuario por su email
     query = select(UsuarioDB).where(UsuarioDB.email == credenciales.email)
     usuario = session.exec(query).first()
 
-    # 2. Validar existencia de usuario y contraseña correcta
-    # IMPORTANTE: Usamos un mensaje genérico por seguridad (evita listar emails válidos)
-    if not usuario or not verificar_password(credenciales.password, usuario.hashed_password):
+    # 2. Validar existencia del usuario y verificación de contraseña hash
+    if not usuario or not verificar_password(
+        credenciales.password, usuario.hashed_password
+    ):
         raise HTTPException(
-            status_code=401,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email o contraseña incorrectos",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # 3. Crear el token con los datos que nos interesan (payload)
+    # 3. Construir los datos del payload para el token JWT
     datos_token = {
         "sub": str(usuario.id_usuario),
         "email": usuario.email,
-        "es_admin": usuario.es_admin
+        "es_admin": usuario.es_admin,
     }
+
+    # 4. Generar el token de acceso
     access_token = crear_token_acceso(datos_token)
 
-    # 4. Devolver el token generado
-    return TokenResponse(access_token=access_token)
-
+    # 5. Devolver la respuesta estructurada
+    return TokenResponse(access_token=access_token, token_type="bearer")

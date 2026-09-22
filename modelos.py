@@ -1,5 +1,5 @@
 from typing import Optional, List
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 from sqlmodel import SQLModel, Field, Relationship
 
 # ==========================================
@@ -153,12 +153,11 @@ class UsuarioCreate(BaseModel):
 
 class UsuarioResponse(BaseModel):
     """DTO para la respuesta de datos públicos de usuario."""
+    model_config = ConfigDict(from_attributes=True)
     id_usuario: int
     nombre: str
-    email: EmailStr
-
-    class Config:
-        from_attributes = True
+    email: str
+    es_admin: bool
 
 
 # --- AUTENTICACIÓN ---
@@ -180,14 +179,16 @@ class ReservaCreate(BaseModel):
     id_espacio: int
     horas: int
 
+class ReservaUpdateDTO(BaseModel):
+    """DTO para la actualización parcial de una reserva."""
+    id_espacio: int = None
+    horas: int = None
 
 class ReservaResponse(BaseModel):
     """DTO para la respuesta detallada de una reserva creada."""
+    model_config = ConfigDict(from_attributes=True)
     id_reserva: int
     id_usuario: int
     id_espacio: int
     horas: int
     total: float
-
-    class Config:
-        from_attributes = True
