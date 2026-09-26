@@ -48,6 +48,8 @@ app = FastAPI(
     "/espacios",
     response_model=List[EspacioDB],
     status_code=status.HTTP_200_OK,
+    summary="Listar espacios",
+description="Obtiene el listado completo de todos los espacios físicos disponibles y registrados en la plataforma."
 )
 def listar_espacios(
     esta_disponible: Optional[bool] = None,
@@ -76,6 +78,8 @@ def listar_espacios(
     "/espacios",
     response_model=EspacioDB,
     status_code=status.HTTP_201_CREATED,
+    summary="Registrar un nuevo espacio",
+    description="Registra un nuevo espacio en la plataforma validando sus datos"
 )
 def crear_espacio(
     nuevo_espacio: EspacioCreateDTO,
@@ -111,6 +115,8 @@ def crear_espacio(
     "/espacios/{id_espacio}",
     response_model=EspacioDB,
     status_code=status.HTTP_200_OK,
+    summary="Actualizar espacio",
+    description="Modifica de manera parcial los datos de un espacio existente utilizando su identificador único."
 )
 def actualizar_espacio(
     id_espacio: int,
@@ -151,6 +157,8 @@ def actualizar_espacio(
 @app.delete(
     "/espacios/{id_espacio}",
     status_code=status.HTTP_200_OK,
+    summary="Eliminar espacio",
+    description="Da de baja o elimina un espacio físico del sistema según su identificador."
 )
 def eliminar_espacio(
     id_espacio: int,
@@ -201,6 +209,8 @@ def eliminar_espacio(
     "/usuarios",
     response_model=UsuarioResponse,
     status_code=status.HTTP_201_CREATED,
+    summary="Registrar un nuevo usuario",
+    description="Registra un nuevo usuario en la plataforma validando sus datos."
 )
 def crear_usuario(
     usuario_input: UsuarioCreate,
@@ -239,6 +249,8 @@ def crear_usuario(
     "/usuarios",
     response_model=List[UsuarioResponse],
     status_code=status.HTTP_200_OK,
+    summary="Listar usuarios",
+    description="Obtiene un listado con todos los usuarios registrados en el sistema."
 )
 def listar_usuarios(
     session: Session = Depends(obtener_sesion),
@@ -262,6 +274,8 @@ def listar_usuarios(
     "/usuarios/{id_usuario}",
     response_model=UsuarioResponse,
     status_code=status.HTTP_200_OK,
+    summary="Obtener usuario por ID",
+    description="Recupera la información detallada de un usuario específico a partir de su identificador único."
 )
 def obtener_usuario(
     id_usuario: int,
@@ -284,6 +298,8 @@ def obtener_usuario(
     "/usuarios/{id_usuario}",
     response_model=UsuarioResponse,
     status_code=status.HTTP_200_OK,
+    summary="Actualizar usuario",
+    description="Actualiza la información de perfil o los datos de un usuario existente."
 )
 def actualizar_usuario(
     id_usuario: int,
@@ -329,6 +345,8 @@ def actualizar_usuario(
 @app.delete(
     "/usuarios/{id_usuario}",
     status_code=status.HTTP_200_OK,
+    summary="Eliminar usuario",
+    description="Elimina o desactiva la cuenta de un usuario del sistema."
 )
 def eliminar_usuario(
     id_usuario: int,
@@ -373,14 +391,16 @@ def eliminar_usuario(
 @app.get(
     "/usuarios/{id_usuario}/reservas",
     status_code=status.HTTP_200_OK,
+    summary="Obtener reservas de un usuario",
+    description="Retorna el historial completo de reservas asociadas a un usuario en particular."
 )
 def obtener_reservas_de_usuarios(
     id_usuario: int,
     session: Session = Depends(obtener_sesion),
-    usuario_token: dict = Depends(obtener_usuario_actual),
+    _: dict = Depends(obtener_usuario_actual),
 ):
     """Obtiene el listado de reservas asociadas a un usuario específico."""
-    # 1. Validar existencia del usuario
+    # Buscamos al usuario y validamos su existencia en un solo paso
     usuario = session.get(UsuarioDB, id_usuario)
     if not usuario:
         raise HTTPException(
@@ -398,11 +418,13 @@ def obtener_reservas_de_usuarios(
     "/reservas",
     response_model=ReservaResponse,
     status_code=status.HTTP_201_CREATED,
+    summary="Registra una nueva reserva",
+    description="Registra una nueva Reserva en la plataforma validando sus datos"
 )
 def crear_reserva(
     datos: ReservaCreate,
     session: Session = Depends(obtener_sesion),
-    usuario_token: dict = Depends(obtener_usuario_actual),
+    usuario_token: dict = Depends(obtener_usuario_actual)
 ):
     """Crea una nueva reserva validando disponibilidad y calculando el total."""
     # 1. Obtener ID del usuario autenticado desde el JWT
@@ -464,6 +486,8 @@ def crear_reserva(
     "/reservas/{id_reserva}",
     response_model=ReservaResponse,
     status_code=status.HTTP_200_OK,
+    summary="Actualizar reserva",
+    description="Modifica los parámetros (como cantidad de horas o detalles) de una reserva existente."
 )
 def actualizar_reserva(
     id_reserva: int,
@@ -522,6 +546,8 @@ def actualizar_reserva(
     "/reservas/propias",
     response_model=List[ReservaResponse],
     status_code=status.HTTP_200_OK,
+    summary="Listar mis reservas",
+    description="Obtiene el listado de reservas realizadas exclusivamente por el usuario que se encuentra autenticado."
 )
 def listar_mis_reservas(
     session: Session = Depends(obtener_sesion),
@@ -542,6 +568,8 @@ def listar_mis_reservas(
     "/reservas",
     response_model=List[ReservaResponse],
     status_code=status.HTTP_200_OK,
+    summary="Listar reservas",
+    description="Obtiene el listado general de todas las reservas registradas en la plataforma."
 )
 def listar_reservas(
     session: Session = Depends(obtener_sesion),
@@ -563,6 +591,8 @@ def listar_reservas(
 @app.get(
     "/reservas/{id_reserva}",
     status_code=status.HTTP_200_OK,
+    summary="Actualizar reserva",
+    description="Modifica los parámetros (como cantidad de horas o detalles) de una reserva existente."
 )
 def obtener_reserva_detallada(
     id_reserva: int,
@@ -606,6 +636,8 @@ def obtener_reserva_detallada(
 @app.delete(
     "/reservas/{id_reserva}",
     status_code=status.HTTP_200_OK,
+    summary="Cancelar reserva",
+    description="Cancela una reserva activa y libera nuevamente la disponibilidad del espacio correspondiente."
 )
 def cancelar_reserva(
     id_reserva: int,
@@ -655,6 +687,8 @@ def cancelar_reserva(
     "/login",
     response_model=TokenResponse,
     status_code=status.HTTP_200_OK,
+    summary="Iniciar sesión",
+    description="Autentica las credenciales del usuario y retorna un token de acceso (JWT) para consumir la API."
 )
 def login(
     credenciales: UsuarioLoginDTO,
