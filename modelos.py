@@ -1,6 +1,7 @@
 from typing import Optional, List
 from pydantic import BaseModel, EmailStr, ConfigDict, Field
 from sqlmodel import SQLModel, Field, Relationship
+from datetime import datetime
 
 # ==========================================
 # 1. TABLAS PARA LA BASE DE DATOS (SQLModel)
@@ -40,8 +41,9 @@ class ReservaTabla(SQLModel, table=True):
     __tablename__ = "reserva"
 
     id_reserva: Optional[int] = Field(default=None, primary_key=True)
-    horas: int
     total: float
+    fecha_inicio: datetime
+    fecha_fin: datetime
 
     # 1. Claves Foráneas (Restricción física en SQLite)
     id_usuario: int = Field(foreign_key="usuario.id_usuario")
@@ -94,32 +96,42 @@ class Espacio:
         print(f"El espacio '{self.nombre}' ahora está disponible.")
 
 class Reserva:
-    def __init__ (self, id_reserva: int, usuario: Usuario, espacio: Espacio, horas: int):
-        #  --- Validacion 1: horas positivas ---
-        if horas <= 0:
-            raise ReservaError("la cantidad de horas debe ser mayor a cero.")
+    def __init__(self, id_reserva: int, usuario, espacio, fecha_inicio: datetime, fecha_fin: datetime):
+        # 1. Validar que la fecha de inicio no sea en el pasado
+        ahora = datetime.now()
+        if fecha_inicio <= ahora:
+            raise ReservaError("No puedes hacer reservas en el pasado.")
 
-        # --- Validacion 2: disponibilidad del espacio ---
+        # 2. Validar que el final sea posterior al inicio
+        if fecha_fin < fecha_inicio:
+            raise ReservaError("La fecha y hora de fin deben ser posteriores a la de inicio.")
+
+        # 3. Validar disponibilidad del espacio
         if not espacio.esta_disponible:
-            raise ReservaError(f"el espacio '{espacio.nombre}' no esta disponible para reservar.")
+            raise ReservaError(f"El espacio '{espacio.nombre}' no está disponible para reservar.")
 
-        #si las validaciones pasan, asignamos las propiedades
+        # Asignación de propiedades si todo es válido
         self.id_reserva = id_reserva
         self.usuario = usuario
         self.espacio = espacio
-        self.horas = horas
+        self.fecha_inicio = fecha_inicio
+        self.fecha_fin = fecha_fin
 
-        #ocupamos el espacio automaticamente al crear la reserva exitosa
+        # Ocupar el espacio automáticamente
         self.espacio.reservar()
 
-    def calcular_total(self):
-        total = self.horas * self.espacio.precio_por_hora
-        return total
+    def calcular_total(self) -> float:
+        # Convertimos la diferencia de tiempo a horas totales exactas
+        duracion_horas = (self.fecha_fin - self.fecha_inicio).total_seconds() / 3600
+        return duracion_horas * self.espacio.precio_por_hora
 
-    def obtener_resumen(self):
+    def obtener_resumen(self) -> str:
         total = self.calcular_total()
-        return f"Reserva #{self.id_reserva} | Usuario: {self.usuario.nombre} | Espacio: {self.espacio.nombre} | Total: ${total}"
-
+        return (
+            f"Reserva #{self.id_reserva} | Usuario: {self.usuario.nombre} | "
+            f"Espacio: {self.espacio.nombre} | Inicio: {self.fecha_inicio} | "
+            f"Fin: {self.fecha_fin} | Total: ${total:.2f}"
+        )
 
 # ==========================================
 # 3. DTOs (Data Transfer Objects / Schemas)
@@ -204,16 +216,18 @@ class ReservaCreate(BaseModel):
         description="numero de identificacion del espacio",
         ge=0,
     )
-    horas: int = Field(
-        ...,
-        description="cantidad de horas a ocupar",
-        gt=0,
+    fecha_inicio: datetime = Field(
+        description="fecha de inicio de la reserva",
     )
+    fecha_fin: datetime = Field(
+            description="fecha de finalización de la reserva",
+        )
 
 class ReservaUpdateDTO(BaseModel):
     """DTO para la actualización parcial de una reserva."""
     id_espacio: int = None
-    horas: int = None
+    fecha_inicio: datetime = None
+    fecha_fin: datetime = None
 
 class ReservaResponse(BaseModel):
     """DTO para la respuesta detallada de una reserva creada."""
@@ -221,5 +235,6 @@ class ReservaResponse(BaseModel):
     id_reserva: int
     id_usuario: int
     id_espacio: int
-    horas: int
+    fecha_inicio: datetime
+    fecha_fin: datetime
     total: float

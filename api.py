@@ -3,6 +3,7 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from sqlmodel import Session, select, SQLModel
 from typing import List
 from typing import Optional
+from datetime import datetime, timedelta
 
 # Importamos la conexión a la BD
 from database import engine, crear_db_y_tablas, obtener_sesion
@@ -27,8 +28,12 @@ async def lifespan(app: FastAPI):
     # Código que se ejecuta al arrancar la aplicación
     SQLModel.metadata.create_all(engine)
     yield
-    # Código que se ejecuta al apagar la aplicación (si hiciera falta)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Código que se ejecuta ANTES de que arrancar el servidor
+    SQLModel.metadata.create_all(engine)
+    yield
 
 app = FastAPI(
     title="API de Gestión de Espacios y Reservas",
@@ -38,6 +43,7 @@ app = FastAPI(
         "name": "Arístides",
         "email": "aristides@example.com",
     },
+    lifespan=lifespan
 )
 
 # ==========================================
@@ -459,7 +465,8 @@ def crear_reserva(
             id_reserva=None,
             usuario=usuario_poo,
             espacio=espacio_poo,
-            horas=datos.horas,
+            fecha_inicio=datos.fecha_inicio,
+            fecha_fin=datos.fecha_inicio
         )
     except Exception as e:
         raise HTTPException(
@@ -473,7 +480,8 @@ def crear_reserva(
     nueva_reserva_db = ReservaTabla(
         id_usuario=id_usuario_logueado,
         id_espacio=datos.id_espacio,
-        horas=datos.horas,
+        fecha_inicio=datos.fecha_inicio,
+        fecha_fin=datos.fecha_fin,
         total=reserva_poo.calcular_total(),
     )
     session.add(nueva_reserva_db)
@@ -487,17 +495,15 @@ def crear_reserva(
     response_model=ReservaResponse,
     status_code=status.HTTP_200_OK,
     summary="Actualizar reserva",
-    description="Modifica los parámetros (como cantidad de horas o detalles) de una reserva existente."
+    description="Modifica los parámetros (como fecha de inicio o fin) de una reserva existente."
 )
 def actualizar_reserva(
     id_reserva: int,
     reserva_update: ReservaUpdateDTO,
     session: Session = Depends(obtener_sesion),
-    usuario_actual: dict = Depends(
-        obtener_usuario_actual
-    ),  # Especificamos dict
+    usuario_actual: dict = Depends(obtener_usuario_actual),
 ):
-    """Actualiza parcialmente una reserva (p. ej. las horas) y recalcula el total."""
+    """Actualiza parcialmente una reserva y recalcula el total si cambian las fechas."""
     # 1. Buscar la reserva en BD
     reserva_db = session.get(ReservaTabla, id_reserva)
     if not reserva_db:
@@ -516,24 +522,37 @@ def actualizar_reserva(
             detail="No tienes permisos para modificar esta reserva",
         )
 
-    # 3. Aplicar los cambios enviados
+    # 3. Aplicar los cambios enviados (filtrando los que no vienen en el request)
     datos_actualizar = reserva_update.model_dump(exclude_unset=True)
 
-    if "horas" in datos_actualizar and datos_actualizar["horas"] is not None:
-        nuevas_horas = datos_actualizar["horas"]
+    # Determinamos las fechas finales a usar (si el usuario no mandó una, usamos la que ya estaba en la BD)
+    nueva_fecha_inicio = datos_actualizar.get("fecha_inicio", reserva_db.fecha_inicio)
+    nueva_fecha_fin = datos_actualizar.get("fecha_fin", reserva_db.fecha_fin)
 
-        if nuevas_horas <= 0:
+    # Validaciones temporales si se modificó alguna de las dos fechas
+    if "fecha_inicio" in datos_actualizar or "fecha_fin" in datos_actualizar:
+        ahora = datetime.now()
+        if nueva_fecha_inicio <= ahora:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Las horas deben ser mayores a cero",
+                detail="No puedes hacer reservas en el pasado."
+            )
+        
+        if nueva_fecha_fin <= nueva_fecha_inicio:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La fecha y hora de fin deben ser posteriores a la de inicio."
             )
 
-        # Traemos el espacio para recalcular el precio total dinámicamente
+        # Recalcular el precio total dinámicamente con las fechas definitivas
         espacio = session.get(EspacioDB, reserva_db.id_espacio)
         if espacio:
-            reserva_db.total = nuevas_horas * espacio.precio_por_hora
+            duracion_horas = (nueva_fecha_fin - nueva_fecha_inicio).total_seconds() / 3600
+            reserva_db.total = duracion_horas * espacio.precio_por_hora
 
-        reserva_db.horas = nuevas_horas
+    # Actualizamos los campos en la instancia de la base de datos
+    for key, value in datos_actualizar.items():
+        setattr(reserva_db, key, value)
 
     # 4. Guardar cambios en la BD
     session.add(reserva_db)
@@ -541,7 +560,6 @@ def actualizar_reserva(
     session.refresh(reserva_db)
 
     return reserva_db
-
 @app.get(
     "/reservas/propias",
     response_model=List[ReservaResponse],
@@ -591,8 +609,8 @@ def listar_reservas(
 @app.get(
     "/reservas/{id_reserva}",
     status_code=status.HTTP_200_OK,
-    summary="Actualizar reserva",
-    description="Modifica los parámetros (como cantidad de horas o detalles) de una reserva existente."
+    summary="Obtener reserva detallada",
+    description="Busca y retorna los detalles completos de una reserva específica mediante su identificador."
 )
 def obtener_reserva_detallada(
     id_reserva: int,
@@ -620,7 +638,8 @@ def obtener_reserva_detallada(
 
     return {
         "id_reserva": reserva.id_reserva,
-        "horas": reserva.horas,
+        "fecha_inicio": reserva.fecha_inicio,
+        "fecha_fin": reserva.fecha_fin,
         "total": reserva.total,
         "cliente": {
             "nombre": reserva.usuario.nombre,
@@ -637,14 +656,14 @@ def obtener_reserva_detallada(
     "/reservas/{id_reserva}",
     status_code=status.HTTP_200_OK,
     summary="Cancelar reserva",
-    description="Cancela una reserva activa y libera nuevamente la disponibilidad del espacio correspondiente."
+    description="Cancela una reserva activa respetando el límite de anticipación y libera el espacio."
 )
 def cancelar_reserva(
     id_reserva: int,
     session: Session = Depends(obtener_sesion),
     usuario_token: dict = Depends(obtener_usuario_actual),
 ):
-    """Cancela una reserva activa y libera automáticamente la disponibilidad del espacio."""
+    """Cancela una reserva activa validando el margen de tiempo y liberando el espacio."""
     id_usuario_logueado = int(usuario_token["sub"])
 
     # 1. Buscar la reserva
@@ -665,13 +684,23 @@ def cancelar_reserva(
             detail="No tienes permisos para cancelar esta reserva",
         )
 
-    # 3. Liberar el espacio asociado
+    # 3. Validar la regla de negocio: Margen de tiempo para cancelar (Ej: mínimo 2 horas antes)
+    margen_permitido = timedelta(hours=2)
+    tiempo_restante = reserva.fecha_inicio - datetime.now()
+
+    if tiempo_restante < margen_permitido:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se puede cancelar una reserva con menos de 2 horas de anticipación.",
+        )
+
+    # 4. Liberar el espacio asociado
     espacio = session.get(EspacioDB, reserva.id_espacio)
     if espacio:
         espacio.esta_disponible = True
         session.add(espacio)
 
-    # 4. Eliminar el registro de la reserva
+    # 5. Eliminar el registro de la reserva
     session.delete(reserva)
     session.commit()
 
