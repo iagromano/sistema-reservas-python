@@ -1,5 +1,5 @@
 from typing import Optional, List
-from pydantic import BaseModel, EmailStr, ConfigDict
+from pydantic import BaseModel, EmailStr, ConfigDict, Field
 from sqlmodel import SQLModel, Field, Relationship
 
 # ==========================================
@@ -127,11 +127,25 @@ class Reserva:
 
 # --- ESPACIOS ---
 class EspacioCreateDTO(BaseModel):
-    """DTO para la creación de un nuevo espacio."""
-    nombre: str
-    capacidad: int
-    precio_por_hora: float
-    esta_disponible: bool = True
+    """DTO para el registro de un nuevo espacio."""
+    nombre: str = Field(
+        ...,
+        description="Nombre identificatorio del espacio físico.",
+    )
+    capacidad: int = Field(
+        ...,
+        gt=0,
+        description="Capacidad máxima de personas permitidas en el espacio.",
+    )
+    precio_por_hora: float = Field(
+        ...,
+        ge=0,
+        description="Costo monetario por hora de uso del espacio.",
+    )
+    esta_disponible: bool = Field(
+        default=True,
+        description="Indica si el espacio se encuentra habilitado para recibir reservas.",
+    )
 
 
 class EspacioUpdateDTO(BaseModel):
@@ -145,9 +159,18 @@ class EspacioUpdateDTO(BaseModel):
 # --- USUARIOS ---
 class UsuarioCreate(BaseModel):
     """DTO para el registro de un nuevo usuario."""
-    nombre: str
-    email: EmailStr
-    password: str 
+    nombre: str = Field(
+        ...,
+        description="Nombre del Usuario",
+    )
+    email: EmailStr = Field(
+        ...,
+        description="correo electronico del usuario",
+    )
+    password: str = Field(
+        ...,
+        description="contraseña del usuario"
+    )
     es_admin: bool = False
 
 
@@ -176,8 +199,16 @@ class TokenResponse(BaseModel):
 # --- RESERVAS ---
 class ReservaCreate(BaseModel):
     """DTO para la solicitud de creación de una reserva."""
-    id_espacio: int
-    horas: int
+    id_espacio: int = Field(
+        ...,
+        description="numero de identificacion del espacio",
+        ge=0,
+    )
+    horas: int = Field(
+        ...,
+        description="cantidad de horas a ocupar",
+        gt=0,
+    )
 
 class ReservaUpdateDTO(BaseModel):
     """DTO para la actualización parcial de una reserva."""

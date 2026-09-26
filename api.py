@@ -29,9 +29,16 @@ async def lifespan(app: FastAPI):
     yield
     # Código que se ejecuta al apagar la aplicación (si hiciera falta)
 
-# Le pasás el lifespan al instanciar FastAPI
-app = FastAPI(lifespan=lifespan)
 
+app = FastAPI(
+    title="API de Gestión de Espacios y Reservas",
+    description="Backend profesional desarrollado con FastAPI, SQLModel y JWT para la gestión de usuarios, espacios físicos y reservas con control de roles (RBAC).",
+    version="1.0.0",
+    contact={
+        "name": "Arístides",
+        "email": "aristides@example.com",
+    },
+)
 
 # ==========================================
 # ENDPOINTS DE ESPACIOS
