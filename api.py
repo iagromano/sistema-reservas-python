@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, status
-from sqlmodel import Session, select, SQLModel
+from sqlmodel import Session, select, SQLModel, and_
 from typing import List
 from typing import Optional
 from datetime import datetime, timedelta
@@ -250,7 +250,29 @@ def crear_usuario(
 
     return nuevo_usuario_db
 
+@app.get(
+    "/usuarios/me",
+    response_model=UsuarioResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Perfil",
+    description="obtiene el detalle del perfil logueado."
+)
+def perfil(
+    session: Session = Depends(obtener_sesion),
+    usuario_token: dict = Depends(obtener_usuario_actual),
+):
+    #extraigo el id del usuario logueado para luego buscarlo en la base
+    id_usuario_logueado =  int(usuario_token["sub"])
+    usuario_db = session.get(UsuarioDB, id_usuario_logueado)
+    #2. verifico que el usuario este en la base
+    if not usuario_db:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado",
+        )
+    return usuario_db
 
+    
 @app.get(
     "/usuarios",
     response_model=List[UsuarioResponse],
@@ -289,7 +311,14 @@ def obtener_usuario(
     usuario_token: dict = Depends(obtener_usuario_actual),
 ):
     """Obtiene la información pública de un usuario específico."""
-    # 1. Buscar usuario por ID
+    #1. Validar permisos de administrador
+    es_admin = usuario_token.get("es_admin",False)
+    if not es_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para realizar esta acción",
+        )
+    # 2. Buscar usuario por ID
     usuario = session.get(UsuarioDB, id_usuario)
     if not usuario:
         raise HTTPException(
@@ -403,8 +432,15 @@ def eliminar_usuario(
 def obtener_reservas_de_usuarios(
     id_usuario: int,
     session: Session = Depends(obtener_sesion),
-    _: dict = Depends(obtener_usuario_actual),
+    usuario_actual: dict = Depends(obtener_usuario_actual),
 ):
+    es_admin_actual = usuario_actual.get("es_admin", False)
+    if not es_admin_actual:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para realizar esta acción"
+        )
+
     """Obtiene el listado de reservas asociadas a un usuario específico."""
     # Buscamos al usuario y validamos su existencia en un solo paso
     usuario = session.get(UsuarioDB, id_usuario)
@@ -444,6 +480,23 @@ def crear_reserva(
             detail="El espacio no existe",
         )
 
+    #validación de solapamiento de horarios para el mismo espacio
+    conflicto_reserva = session.exec(
+        select(ReservaTabla).where(
+            and_(
+                ReservaTabla.id_espacio == datos.id_espacio,
+                ReservaTabla.fecha_inicio < datos.fecha_fin,
+                ReservaTabla.fecha_fin > datos.fecha_inicio
+            )
+        )
+    ).first()
+
+    if conflicto_reserva:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="el espacio ya se encuentra reservado en este rango horario."
+        )
+
     usuario_db = session.get(UsuarioDB, id_usuario_logueado)
 
     # 3. Reconstrucción POO y Validaciones de Negocio
@@ -466,17 +519,14 @@ def crear_reserva(
             usuario=usuario_poo,
             espacio=espacio_poo,
             fecha_inicio=datos.fecha_inicio,
-            fecha_fin=datos.fecha_inicio
+            fecha_fin=datos.fecha_fin
         )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
         )
 
-    # 4. Actualizar disponibilidad del espacio y guardar la reserva
-    espacio_db.esta_disponible = espacio_poo.esta_disponible
-    session.add(espacio_db)
-
+    # 4. Guardar la nueva reserva (la disponibilidad se calcula por horarios de forma dinámica)
     nueva_reserva_db = ReservaTabla(
         id_usuario=id_usuario_logueado,
         id_espacio=datos.id_espacio,
@@ -522,6 +572,26 @@ def actualizar_reserva(
             detail="No tienes permisos para modificar esta reserva",
         )
 
+    # Determinamos qué id_espacio evaluar (si no viene en el patch, usamos el que ya tenía la reserva)
+    espacio_a_verificar = reserva_update.id_espacio if reserva_update.id_espacio is not None else reserva_db.id_espacio
+
+    # Validación de solapamiento para PATCH (excluyendo la propia reserva actual)
+    conflicto_reserva = session.exec(
+        select(ReservaTabla).where(
+            and_(
+                ReservaTabla.id_espacio == espacio_a_verificar,
+                ReservaTabla.id_reserva != id_reserva,
+                ReservaTabla.fecha_inicio < (reserva_update.fecha_fin if reserva_update.fecha_fin is not None else reserva_db.fecha_fin),
+                ReservaTabla.fecha_fin > (reserva_update.fecha_inicio if reserva_update.fecha_inicio is not None else reserva_db.fecha_inicio)
+            )
+        )
+    ).first()
+
+    if conflicto_reserva:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El espacio ya se encuentra reservado en ese nuevo rango horario."
+        )
     # 3. Aplicar los cambios enviados (filtrando los que no vienen en el request)
     datos_actualizar = reserva_update.model_dump(exclude_unset=True)
 
@@ -560,6 +630,7 @@ def actualizar_reserva(
     session.refresh(reserva_db)
 
     return reserva_db
+
 @app.get(
     "/reservas/propias",
     response_model=List[ReservaResponse],

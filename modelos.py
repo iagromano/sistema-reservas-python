@@ -2,6 +2,7 @@ from typing import Optional, List
 from pydantic import BaseModel, EmailStr, ConfigDict, Field
 from sqlmodel import SQLModel, Field, Relationship
 from datetime import datetime
+from sqlalchemy import Column, DateTime
 
 # ==========================================
 # 1. TABLAS PARA LA BASE DE DATOS (SQLModel)
@@ -42,8 +43,8 @@ class ReservaTabla(SQLModel, table=True):
 
     id_reserva: Optional[int] = Field(default=None, primary_key=True)
     total: float
-    fecha_inicio: datetime
-    fecha_fin: datetime
+    fecha_inicio: datetime = Field(sa_column=Column(DateTime(timezone=False), nullable=False))
+    fecha_fin: datetime = Field(sa_column=Column(DateTime(timezone=False), nullable=False))
 
     # 1. Claves Foráneas (Restricción física en SQLite)
     id_usuario: int = Field(foreign_key="usuario.id_usuario")
