@@ -15,7 +15,7 @@ from modelos import (
     UsuarioCreate, UsuarioResponse,
     TokenResponse, ReservaCreate, ReservaResponse,
     EspacioCreateDTO, EspacioUpdateDTO, UsuarioLoginDTO,
-    ReservaUpdateDTO 
+    ReservaUpdateDTO, EspacioResponse
 )
 
 from seguridad import crear_token_acceso, verificar_password, obtener_hash_password, obtener_usuario_actual
@@ -78,6 +78,28 @@ def listar_espacios(
 
     espacios = session.exec(consulta).all()
     return espacios
+
+@app.get(
+        "/espacios/{id_espacio}",
+        response_model=EspacioResponse,
+        status_code=status.HTTP_200_OK,
+        summary="obtener espacio por ID",
+        description="Recupera la informacion detallade un espacio específico a partir de su identificador único."
+)
+def obtener_espacio(
+    id_espacio: int,
+    session: Session = Depends(obtener_sesion),
+    usuario_token: dict = Depends(obtener_usuario_actual),
+):
+    """obtiene la informacion pública de un usuario específico"""
+    espacio = session.get(EspacioDB, id_espacio)
+    if not espacio:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"el espacio con el ID {id_espacio} no existe",
+        )
+    
+    return espacio
 
 
 @app.post(
@@ -614,11 +636,36 @@ def actualizar_reserva(
                 detail="La fecha y hora de fin deben ser posteriores a la de inicio."
             )
 
-        # Recalcular el precio total dinámicamente con las fechas definitivas
-        espacio = session.get(EspacioDB, reserva_db.id_espacio)
-        if espacio:
-            duracion_horas = (nueva_fecha_fin - nueva_fecha_inicio).total_seconds() / 3600
-            reserva_db.total = duracion_horas * espacio.precio_por_hora
+        # Recalcular el precio total usando el modelo de dominio centralizado
+        espacio_db = session.get(EspacioDB, reserva_db.id_espacio)
+        usuario_db = session.get(UsuarioDB, reserva_db.id_usuario)
+
+        if espacio_db and usuario_db:
+            # Reconstruimos los objetos POO auxiliares necesarios para la entidad de dominio
+            usuario_poo = Usuario(
+                id_usuario=usuario_db.id_usuario,
+                nombre=usuario_db.nombre,
+                email=usuario_db.email,
+            )
+            espacio_poo = Espacio(
+                id_espacio=espacio_db.id_espacio,
+                nombre=espacio_db.nombre,
+                capacidad=espacio_db.capacidad,
+                precio_por_hora=espacio_db.precio_por_hora,
+                esta_disponible=espacio_db.esta_disponible,
+            )
+            
+            # Instanciamos la clase de dominio con las fechas definitivas (nuevas o mantenidas)
+            reserva_poo = Reserva(
+                id_reserva=reserva_db.id_reserva,
+                usuario=usuario_poo,
+                espacio=espacio_poo,
+                fecha_inicio=nueva_fecha_inicio,
+                fecha_fin=nueva_fecha_fin,
+            )
+            
+            # Asignamos el total llamando al método centralizado
+            reserva_db.total = reserva_poo.calcular_total()
 
     # Actualizamos los campos en la instancia de la base de datos
     for key, value in datos_actualizar.items():

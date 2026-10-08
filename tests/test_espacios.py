@@ -20,7 +20,6 @@ def obtener_token_admin(client) -> str:
     )
     return res.json()["access_token"]
 
-
 def obtener_token_usuario_comun(client) -> str:
     """Helper para crear un usuario estándar y obtener su token JWT."""
     client.post(
@@ -37,7 +36,6 @@ def obtener_token_usuario_comun(client) -> str:
         json={"email": "user@example.com", "password": "userpassword"},
     )
     return res.json()["access_token"]
-
 
 def test_crear_espacio_como_admin(client):
     """Valida que un administrador pueda crear un espacio correctamente."""
@@ -60,7 +58,6 @@ def test_crear_espacio_como_admin(client):
     assert data["nombre"] == "Sala A"
     assert "id_espacio" in data
 
-
 def test_crear_espacio_sin_permisos_falla(client):
     """Valida que un usuario común NO pueda crear un espacio (403 Forbidden)."""
     token = obtener_token_usuario_comun(client)
@@ -79,13 +76,40 @@ def test_crear_espacio_sin_permisos_falla(client):
 
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
-
 def test_listar_espacios_publico(client):
     """Valida que la lista de espacios sea accesible públicamente sin autenticación."""
     response = client.get("/espacios")
     assert response.status_code == status.HTTP_200_OK
     assert isinstance(response.json(), list)
 
+def test_obtener_espacio_por_id(client):
+    """Valida que un usuario logueado pueda obtener los datos de un espacio por su identificador único"""
+    token_admin = obtener_token_admin(client)
+
+    espacio_nuevo = client.post(
+        "/espacios",
+        json={
+            "nombre": "Sala C",
+            "capacidad": 30,
+            "precio_por_hora": 20000.0,
+            "esta_disponible": True,
+        },
+        headers={"Authorization": f"Bearer {token_admin}"}
+    )
+
+    id_espacio = espacio_nuevo.json()["id_espacio"]
+
+    respuesta_get = client.get(
+        f"/espacios/{id_espacio}",
+        headers={"Authorization": f"Bearer {token_admin}"}
+    )
+
+    assert respuesta_get.status_code == status.HTTP_200_OK
+    assert respuesta_get.json()["id_espacio"] == id_espacio
+    assert respuesta_get.json()["nombre"] == "Sala C"
+    assert respuesta_get.json()["capacidad"] == 30
+    assert respuesta_get.json()["precio_por_hora"] == 20000.0
+    assert respuesta_get.json()["esta_disponible"] == True
 
 def test_eliminar_espacio_admin_exitoso(client, session: Session):
     # 1. Token Admin + espacio a eliminar

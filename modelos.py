@@ -160,7 +160,6 @@ class EspacioCreateDTO(BaseModel):
         description="Indica si el espacio se encuentra habilitado para recibir reservas.",
     )
 
-
 class EspacioUpdateDTO(BaseModel):
     """DTO para la actualización parcial de un espacio."""
     nombre: Optional[str] = None
@@ -168,6 +167,14 @@ class EspacioUpdateDTO(BaseModel):
     precio_por_hora: Optional[float] = None
     esta_disponible: Optional[bool] = None
 
+class EspacioResponse(BaseModel):
+    """DTO para la respuesta de datos públicos del espacio"""
+    model_config = ConfigDict(from_attributes=True)
+    id_espacio: int
+    nombre: str
+    capacidad: int
+    precio_por_hora: float
+    esta_disponible: bool
 
 # --- USUARIOS ---
 class UsuarioCreate(BaseModel):
